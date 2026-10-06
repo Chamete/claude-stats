@@ -19,6 +19,7 @@ import {
   money,
   priceForecast,
   promptLine,
+  promptRow,
   saverActive,
   sparkline,
   threshold,
@@ -26,6 +27,7 @@ import {
   turnCost,
   turnPrice,
   untilReset,
+  weekForecast,
 } from './format'
 import { face, look, moodColor, moodForTool, prop, saying } from './pet'
 import { STATS_WIDTH, elapsed, enqueue, fit, isBusy, justArrived, orchestratorSaying, rowLayout, species, spinner, visibleWorkers, wire } from './team'
@@ -447,7 +449,7 @@ export const register: Register = on => {
     const week = u.rateLimits.find(r => r.kind === 'seven_day')
     const saving = saverActive(m, five?.percentUsed)
     const fc = five && forecast(list, five.percentUsed, five.resetsAt, now)
-    const weekFc = week && forecast(weekList, week.percentUsed, week.resetsAt, now, WEEK, 24 * 3_600_000)
+    const weekFc = week && weekForecast(week.percentUsed, week.resetsAt, now)
     const recent = turnList.slice(-L.promptRows).reverse()
     const usd = u.cost?.usd
     const price = usd === undefined ? undefined : priceForecast(usd, u.startedAt, now, five?.resetsAt, turnList)
@@ -489,9 +491,9 @@ export const register: Register = on => {
         </Box>
       )
     }
-    const pace = (f: ReturnType<typeof forecast>, unit: (r: number) => string, quiet: string) =>
+    const pace = (f: ReturnType<typeof forecast>, unit: (r: number) => string, quiet: string, waiting = 'Ritmo: reuniendo datos…') =>
       !f ? (
-        <Text dimColor>Ritmo: reuniendo datos…</Text>
+        <Text dimColor>{waiting}</Text>
       ) : f.etaMs === undefined ? (
         <Text color="success">✓ {quiet}</Text>
       ) : (
@@ -547,7 +549,7 @@ export const register: Register = on => {
           {head(week.percentUsed, week.resetsAt)}
           {meter(week.percentUsed, inner)}
           {!L.isShort && <Text color="suggestion">{sparkline(weekList, week.resetsAt, now, inner, WEEK)}</Text>}
-          {pace(weekFc, r => `${Math.round(r * 24 * 10) / 10}%/día`, 'Estable en las últimas 24 h')}
+          {pace(weekFc, r => `${Math.round(r * 24 * 10) / 10}%/día`, 'Sin consumo esta semana', 'Ritmo: se calcula tras el primer día de la ventana')}
         </Box>
       ) : (
         <Text dimColor>Sin lectura semanal todavía.</Text>
@@ -605,7 +607,7 @@ export const register: Register = on => {
       </Text>,
     )
 
-    const showPrice = !L.isCompact
+    const pr = promptRow(inner, L.isCompact)
     const turnsCard = card(
       'turns',
       '💬  Últimos prompts',
@@ -615,15 +617,14 @@ export const register: Register = on => {
         const delta = (t.endPct ?? 0) - (t.startPct ?? 0)
         const p = turnPrice(t)
         return (
-          <Box key={t.turnId} flexDirection="row" gap={1} width={inner}>
+          // Cada columna con su ancho fijo y el texto recortado a lo que queda: nunca salta de línea.
+          <Box key={t.turnId} flexDirection="row" width={inner} overflow="hidden">
             <Text bold color={!t.isDone ? 'claude' : delta >= 5 ? 'error' : delta >= 2 ? 'warning' : 'success'}>
-              {turnCost(t).padStart(6)}
+              {turnCost(t).padStart(6)}{' '}
             </Text>
-            {showPrice && <Text color="warning">{(p === undefined ? '' : money(p)).padStart(7)}</Text>}
-            {!L.isCompact && <Text dimColor>{compact(t.tokens).padStart(5)}</Text>}
-            <Box flexGrow={1} flexShrink={1}>
-              <Text wrap="truncate">{promptLine(t.text, inner)}</Text>
-            </Box>
+            {pr.showPrice && <Text color="warning">{(p === undefined ? '' : money(p)).padStart(7)} </Text>}
+            {pr.showTokens && <Text dimColor>{compact(t.tokens).padStart(5)} </Text>}
+            <Text wrap="truncate">{promptLine(t.text, pr.textWidth)}</Text>
           </Box>
         )
       }),

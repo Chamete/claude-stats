@@ -98,6 +98,22 @@ export function forecast(
   }
 }
 
+/**
+ * Ritmo de la ventana semanal: lo gastado desde que empezó la ventana (siete
+ * días antes del reinicio), no las últimas horas, que exageran un día intenso.
+ * Antes de un día de ventana aún no dice nada.
+ */
+export function weekForecast(pct: number, resetsAt: string | undefined, now: number): Forecast | undefined {
+  const reset = resetsAt ? Date.parse(resetsAt) : NaN
+  if (!Number.isFinite(reset)) return undefined
+  const sinceStart = now - (reset - WEEK)
+  if (sinceStart < 24 * HOUR) return undefined
+  const ratePerHour = pct / (sinceStart / HOUR)
+  if (ratePerHour < 0.01) return { ratePerHour: 0 }
+  const etaMs = ((100 - pct) / ratePerHour) * HOUR
+  return { ratePerHour, etaMs, hitsBeforeReset: now + etaMs < reset }
+}
+
 const BLOCKS = ' ▁▂▃▄▅▆▇█'
 
 /** Gráfico de una línea del uso a lo largo de una ventana, hasta ahora. */
@@ -191,6 +207,15 @@ export function turnCost(t: Turn): string {
   const d = Math.round((t.endPct - t.startPct) * 10) / 10
   // Si la ventana se reinició a mitad de turno, la resta no tiene sentido.
   return d < 0 ? '↻' : `+${d}%`
+}
+
+/** Columnas de una fila de prompt: % (6), precio (7) y tokens (5), cada uno con su espacio. */
+export function promptRow(inner: number, isCompact: boolean) {
+  // Cada columna solo si cabe dejando sitio al texto.
+  const showPrice = !isCompact && inner >= 34
+  const showTokens = !isCompact && inner >= 40
+  const fixed = 6 + 1 + (showPrice ? 7 + 1 : 0) + (showTokens ? 5 + 1 : 0)
+  return { showPrice, showTokens, textWidth: Math.max(4, inner - fixed) }
 }
 
 /** Una línea de prompt, sin saltos y cortada a `width` caracteres. */

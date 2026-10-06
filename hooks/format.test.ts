@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { addTokens, cacheHit, compact, layout, money, NO_TOKENS, priceForecast, promptLine, threshold, turnCost, turnPrice, untilReset } from './format'
+import { addTokens, cacheHit, compact, layout, money, NO_TOKENS, priceForecast, promptLine, promptRow, threshold, turnCost, turnPrice, untilReset, weekForecast } from './format'
 
 const now = Date.parse('2026-10-06T10:00:00Z')
 
@@ -62,4 +62,28 @@ test('el panel se adapta al ancho y al alto', () => {
   expect(layout(130, 40)).toMatchObject({ columns: 2, isCompact: false })
   expect(layout(180, 40)).toMatchObject({ columns: 3, cardWidth: 59 })
   for (const w of [30, 60, 99, 120, 200]) expect(layout(w, 40).cardWidth * layout(w, 40).columns).toBeLessThanOrEqual(w)
+})
+
+test('ritmo semanal: media de la ventana, no las últimas horas', () => {
+  const day = 24 * 3_600_000
+  // Tu captura: 7 % usado, reinicio en 5d23h → la ventana empezó hace 1d1h.
+  const reset = new Date(now + 5 * day + 23 * 3_600_000).toISOString()
+  const f = weekForecast(7, reset, now)!
+  expect(Math.round(f.ratePerHour * 24 * 10) / 10).toBe(6.7)
+  expect(f.hitsBeforeReset).toBe(false)
+  // Menos de un día de ventana: aún no avisa.
+  expect(weekForecast(7, new Date(now + 6.5 * day).toISOString(), now)).toBeUndefined()
+  // Ritmo alto de verdad: 60 % en 2 días → llega antes del reinicio.
+  expect(weekForecast(60, new Date(now + 5 * day).toISOString(), now)!.hitsBeforeReset).toBe(true)
+})
+
+test('las filas de prompts caben en su ancho', () => {
+  for (const inner of [20, 30, 40, 52, 80])
+    for (const isCompact of [true, false]) {
+      const r = promptRow(inner, isCompact)
+      const used = 7 + (r.showPrice ? 8 : 0) + (r.showTokens ? 6 : 0) + r.textWidth
+      expect(used).toBeLessThanOrEqual(Math.max(inner, 7 + 4))
+    }
+  expect(promptRow(52, false).textWidth).toBe(52 - 21)
+  expect(promptRow(30, true)).toMatchObject({ showPrice: false, showTokens: false, textWidth: 23 })
 })
