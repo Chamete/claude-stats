@@ -1,0 +1,17 @@
+{
+  "name": "chame7e",
+  "owner": {
+    "name": "Chame7e",
+    "url": "https://github.com/Chamete"
+  },
+  "metadata": {
+    "description": "Mods de Chame7e para Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "consumo",
+      "source": "./",
+      "description": "Panel de consumo de tu suscripción, modo ahorro y una mascota que reacciona a Claude y a sus subagentes"
+    }
+  ]
+}

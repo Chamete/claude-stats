@@ -1,0 +1,5 @@
+# Tipos que Claude Code genera al cargar el mod: describen el entorno de quien
+# lo carga (incluidas sus herramientas MCP conectadas). Nunca se suben.
+.claude-plugin/types/
+node_modules/
+.DS_Store
