@@ -5,6 +5,10 @@ llevas gastado de tu suscripción y cuánto te queda, ahorra cuando te acercas a
 límite y te acompaña con **NeuroSigma**, una mascota que reacciona a lo que hace
 Claude y a sus subagentes.
 
+<p align="center">
+  <img src="docs/mascota.png" alt="NeuroSigma, la mascota, encima del prompt con su energía" width="420">
+</p>
+
 ## Instalación
 
 En Claude Code (terminal), escribe:
@@ -27,6 +31,8 @@ Para actualizar a la última versión: `claude plugin update consumo` y después
 
 ### Panel `/consumo`
 
+![Panel /consumo](docs/panel.png)
+
 | Tarjeta | Qué enseña |
 | --- | --- |
 | ⏱ Ventana de 5 h | % usado, lo que queda, cuándo se reinicia, gráfico y predicción de si llegarás al límite antes del reinicio |
@@ -36,6 +42,8 @@ Para actualizar a la última versión: `claude plugin update consumo` y después
 | 💬 Últimos prompts | Cuánto % de la ventana, tokens y precio gastó cada prompt |
 | 🌱 Modo ahorro | Estado y botones para cambiarlo |
 | 🤖 Equipo | Aparece cuando hay subagentes: uno por subagente, con cables animados por los que viajan las tareas, el progreso y los resultados |
+
+![Equipo de subagentes](docs/subagentes.png)
 
 El panel se adapta al ancho (1, 2 o 3 columnas) y al alto de la terminal.
 
