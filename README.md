@@ -6,7 +6,7 @@ límite y te acompaña con **NeuroSigma**, una mascota que reacciona a lo que ha
 Claude y a sus subagentes.
 
 <p align="center">
-  <img src="docs/mascota.png" alt="NeuroSigma, la mascota, encima del prompt con su energía" width="420">
+  <img src="docs/mascota.png" alt="NeuroSigma, la mascota, encima del prompt con su nivel y su energía" width="420">
 </p>
 
 ## Instalación

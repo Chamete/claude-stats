@@ -1,6 +1,6 @@
 {
   "name": "consumo",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Panel de consumo de tu suscripción con historial, predicción, tokens, precio y consumo por turno, modo ahorro automático y una mascota que reacciona a lo que hace Claude y a sus subagentes",
   "author": { "name": "Chame7e", "url": "https://github.com/Chamete" },
   "homepage": "https://github.com/Chamete/claude-stats",

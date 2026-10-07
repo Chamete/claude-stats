@@ -540,11 +540,12 @@ export const register: Register = on => {
         {body}
       </Box>
     )
-    const meter = (pct: number, width: number) => {
+    // Por defecto el color dice cuánto queda; donde lleno es bueno, se pasa otro.
+    const meter = (pct: number, width: number, color: string = level(pct)) => {
       const filled = Math.max(0, Math.min(width, Math.round((pct / 100) * width)))
       return (
         <Box flexDirection="row">
-          <Text color={level(pct)}>{'█'.repeat(filled)}</Text>
+          <Text color={color}>{'█'.repeat(filled)}</Text>
           <Text dimColor>{'░'.repeat(width - filled)}</Text>
         </Box>
       )
@@ -676,7 +677,7 @@ export const register: Register = on => {
       ]),
       <Box flexDirection="row" gap={1}>
         <Text dimColor>Caché</Text>
-        {meter(cacheHit(tok), Math.max(6, Math.min(20, inner - 12)))}
+        {meter(cacheHit(tok), Math.max(6, Math.min(20, inner - 12)), cacheHit(tok) >= 70 ? 'success' : 'warning')}
         <Text color={cacheHit(tok) >= 70 ? 'success' : 'warning'}>{cacheHit(tok)}%</Text>
       </Box>,
       <Text dimColor wrap="truncate">
@@ -774,7 +775,7 @@ export const register: Register = on => {
         <Text dimColor>{pr.xp} XP</Text>
       </Box>,
       <Box flexDirection="row" gap={1}>
-        {meter(levelProgress(pr.xp), Math.max(6, inner - 6))}
+        {meter(levelProgress(pr.xp), Math.max(6, inner - 6), 'warning')}
         <Text dimColor>{`${levelProgress(pr.xp)}%`.padStart(4)}</Text>
       </Box>,
       <Text wrap="truncate">
