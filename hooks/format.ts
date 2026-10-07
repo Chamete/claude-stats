@@ -150,6 +150,22 @@ export function saverActive(mode: SaverMode, pct: number | undefined): boolean {
 
 type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | number
 
+/** Nombre legible de un modelo: `claude-opus-5-5[1m]` → `Opus 5.5 · 1M`. */
+export function modelName(id: string | undefined): string {
+  if (!id) return '—'
+  const isLong = /\[1m\]/i.test(id)
+  const m = /(opus|sonnet|haiku|fable)(?:-(\d+)(?:-(\d{1,2}))?)?/i.exec(id)
+  if (!m) return id.replace(/\[1m\]/i, '') + (isLong ? ' · 1M' : '')
+  const family = m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1).toLowerCase()
+  const version = m[2] ? ` ${m[2]}${m[3] ? `.${m[3]}` : ''}` : ''
+  return `${family}${version}${isLong ? ' · 1M' : ''}`
+}
+
+/** La familia de un modelo (opus, sonnet…), para marcar el botón que toca. */
+export function modelFamily(id: string | undefined): string | undefined {
+  return id ? /(opus|sonnet|haiku|fable)/i.exec(id)?.[1]?.toLowerCase() : undefined
+}
+
 /** Lo que el modo ahorro cambia de una petición, o undefined si ya es ligera. */
 export function downgrade(
   model: string,

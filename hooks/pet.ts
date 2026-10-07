@@ -1,9 +1,10 @@
 import type { Mood, Pet } from '../types'
+import { bashKind } from './progress'
 
 /** Lo que la mascota muestra: el estado guardado más el tiempo y la ventana. */
 export type Look = Mood | 'sleeping' | 'tired'
 
-const TRANSIENT: readonly Mood[] = ['error', 'happy', 'surprised', 'love']
+const TRANSIENT: readonly Mood[] = ['error', 'happy', 'surprised', 'love', 'proud']
 const TRANSIENT_MS = 8_000
 const SLEEP_MS = 5 * 60_000
 
@@ -30,6 +31,9 @@ const FACES: Record<Look, readonly string[]> = {
   happy: ['^ᴗ^', '^▽^'],
   surprised: ['O_O', 'o_O'],
   love: ['♥ᴗ♥', '♡ᴗ♡'],
+  git: ['ᵔᴗᵔ', '•ᴗ•'],
+  testing: ['°_°', '°.°'],
+  proud: ['*ᴗ*', 'ˆᴗˆ'],
   sleeping: ['-_-', '-_-'],
   tired: ['=_=', '=.='],
 }
@@ -52,6 +56,9 @@ const PROPS: Record<Look, readonly string[]> = {
   happy: ['✨', '⭐'],
   surprised: ['!', '!!'],
   love: ['♥', '♡'],
+  git: ['📦', '🌿'],
+  testing: ['🧪', '⚗'],
+  proud: ['🏆', '🎉'],
   sleeping: ['z', 'zZ', 'zZz'],
   tired: ['💦', ' '],
 }
@@ -72,6 +79,7 @@ export function moodColor(l: Look): 'claude' | 'suggestion' | 'success' | 'error
       return 'error'
     case 'happy':
     case 'love':
+    case 'proud':
       return 'success'
     case 'tired':
     case 'surprised':
@@ -82,7 +90,10 @@ export function moodColor(l: Look): 'claude' | 'suggestion' | 'success' | 'error
     case 'web':
       return 'suggestion'
     case 'agent':
+    case 'git':
       return 'remember'
+    case 'testing':
+      return 'suggestion'
     default:
       return 'claude'
   }
@@ -100,6 +111,9 @@ const SAYINGS: Record<Look, readonly string[]> = {
   happy: ['¡Listo!', '¡Hecho!', '¡Terminado!'],
   surprised: ['¿Me has parado?', '¡Ups, interrumpido!'],
   love: ['¡Gracias! ♥', '¡Qué gusto!'],
+  git: ['Guardando en git:'],
+  testing: ['Pasando tests:'],
+  proud: ['¡Subí de nivel!'],
   sleeping: ['Zzz…'],
   tired: ['Estoy cansado… queda poca ventana'],
 }
@@ -108,7 +122,8 @@ const SAYINGS: Record<Look, readonly string[]> = {
 export function saying(l: Look, detail: string | undefined, seed: number): string {
   const list = SAYINGS[l]
   const base = list[Math.abs(Math.floor(seed / 1000)) % list.length]!
-  return detail && (l === 'reading' || l === 'writing' || l === 'running') ? `${base} ${detail}` : base
+  if (l === 'proud' && detail) return detail
+  return detail && (l === 'reading' || l === 'writing' || l === 'running' || l === 'git' || l === 'testing') ? `${base} ${detail}` : base
 }
 
 /** Qué hace la mascota con cada herramienta, y el detalle que enseña. */
@@ -125,11 +140,14 @@ export function moodForTool(tool: string, input: Record<string, unknown>): { moo
     case 'Write':
     case 'NotebookEdit':
       return { mood: 'writing', detail: file }
-    case 'Bash':
+    case 'Bash': {
+      const command = typeof input.command === 'string' ? input.command : ''
+      const kind = bashKind(command)
       return {
-        mood: 'running',
-        detail: typeof input.command === 'string' ? short(input.command, 32) : undefined,
+        mood: kind === 'commits' ? 'git' : kind === 'tests' ? 'testing' : 'running',
+        detail: command ? short(command, 32) : undefined,
       }
+    }
     case 'WebFetch':
     case 'WebSearch':
       return { mood: 'web' }

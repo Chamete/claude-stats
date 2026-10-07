@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { addTokens, cacheHit, compact, layout, money, NO_TOKENS, priceForecast, promptLine, promptRow, threshold, turnCost, turnPrice, untilReset, weekForecast } from './format'
+import { addTokens, cacheHit, compact, layout, money, NO_TOKENS, priceForecast, promptLine, promptRow, threshold, turnCost, turnPrice, untilReset, weekForecast , modelFamily, modelName } from './format'
 
 const now = Date.parse('2026-10-06T10:00:00Z')
 
@@ -86,4 +86,13 @@ test('las filas de prompts caben en su ancho', () => {
     }
   expect(promptRow(52, false).textWidth).toBe(52 - 21)
   expect(promptRow(30, true)).toMatchObject({ showPrice: false, showTokens: false, textWidth: 23 })
+})
+
+test('nombres de modelo legibles', () => {
+  expect(modelName('claude-opus-5-5')).toBe('Opus 5.5')
+  expect(modelName('claude-sonnet-5-5[1m]')).toBe('Sonnet 5.5 · 1M')
+  expect(modelName('claude-haiku-4-5-20251001')).toBe('Haiku 4.5')
+  expect(modelName('opus')).toBe('Opus')
+  expect(modelName(undefined)).toBe('—')
+  expect(modelFamily('claude-fable-5-1')).toBe('fable')
 })

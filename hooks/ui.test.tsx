@@ -37,6 +37,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
       })
       expect(await pane.find({ key: 'modo-auto' })).toBeDefined()
       expect(JSON.stringify(await pane.drawn())).toContain('Precio de la sesión')
+      expect(JSON.stringify(await pane.drawn())).toContain('Por herramienta')
+      expect(JSON.stringify(await pane.drawn())).toContain('Nivel 1')
       await pane.press({ key: 'modo-on' })
       expect(await pane.find({ key: 'modo-on' })).toBeDefined()
       await pane.unmount()
@@ -101,5 +103,25 @@ test('un subagente aparece en el panel y en la banda, con su cable', async ($, o
   })
   const text = JSON.stringify(await band.drawn())
   expect(text).toContain('equipo')
-  expect(text).toContain('Coordinando')
+  // El primer subagente desbloquea un logro: la mascota lo celebra antes de seguir coordinando.
+  expect(text).toContain('Refuerzos')
+})
+
+test('la tarjeta enseña el modelo en uso', async ($, on) => {
+  engine(on)
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  // Una petición del modelo principal: el mod lee el modelo de la sesión al refrescar.
+  await $.session.measure({} as never).catch(() => {})
+  const pane = await $.ui.mount({
+    plugin: 'consumo',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'consumo',
+    props: { title: 'Consumo', isFocused: true, bodyColumns: 120 } as never,
+    viewport: { columns: 120, rows: 40 },
+  })
+  const drawn = JSON.stringify(await pane.drawn())
+  expect(drawn).toContain('Modelo y ahorro')
+  expect(drawn).not.toContain('modelo-sonnet')
+  await pane.unmount()
 })

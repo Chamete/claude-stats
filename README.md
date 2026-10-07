@@ -40,7 +40,9 @@ Para actualizar a la última versión: `claude plugin update consumo` y después
 | 💲 Precio | Coste de la sesión (equivalente a precios de API), por hora, por prompt, el último, y proyección hasta el reinicio |
 | 🔢 Tokens | Entrada, salida, caché leída y escrita, y % servido desde caché |
 | 💬 Últimos prompts | Cuánto % de la ventana, tokens y precio gastó cada prompt |
-| 🌱 Modo ahorro | Estado y botones para cambiarlo |
+| 🧰 Por herramienta | Qué herramientas se llevan los tokens de la sesión (Read, Bash, Agent, cada servidor MCP…): % del total, tokens, llamadas y errores |
+| 🧠 Modelo y ahorro | El modelo que responde ahora (con 🌱 si el modo ahorro lo ha cambiado) y botones para el modo ahorro |
+| 🏆 Mascota | Nivel, experiencia hasta el siguiente y logros conseguidos |
 | 🤖 Equipo | Aparece cuando hay subagentes: uno por subagente, con cables animados por los que viajan las tareas, el progreso y los resultados |
 
 ![Equipo de subagentes](docs/subagentes.png)
@@ -53,7 +55,7 @@ Al llegar al **85 %** de la ventana de 5 h, cambia las peticiones de Opus/Fable 
 **Sonnet 5.5** y baja el esfuerzo alto a medio, para que la ventana te dure.
 
 - `/ahorro auto` — se activa solo al llegar al umbral (por defecto)
-- `/ahorro on` — siempre activo
+- `/ahorro on` — encendido: activo siempre, gastes lo que gastes
 - `/ahorro off` — nunca
 
 ### Mascota `/mascota`
@@ -61,10 +63,16 @@ Al llegar al **85 %** de la ventana de 5 h, cambia las peticiones de Opus/Fable 
 NeuroSigma vive encima del prompt y reacciona a lo que pasa: piensa, lee,
 escribe, ejecuta comandos, busca en la web, coordina subagentes, se alegra al
 terminar, se pone triste si algo falla, se duerme tras 5 minutos sin actividad y
-se cansa cuando te queda poca ventana. Pulsa ♥ para acariciarla.
+se cansa cuando te queda poca ventana. Pulsa ♥ para acariciarla. También
+reconoce tus `git commit` y cuando pasas tests.
+
+Gana experiencia con cada prompt, herramienta, subagente, commit y caricia, y
+sube de nivel (de *Bebé* a *Leyenda*). Hay 13 logros por desbloquear; al
+conseguir uno o subir de nivel te avisa y lo celebra.
 
 - `/mascota off` / `/mascota on` — ocultarla o mostrarla
 - `/mascota nombre Pixel` — cambiarle el nombre
+- `/mascota logros` — su nivel y todos los logros, con lo que te falta
 
 ### Avisos
 

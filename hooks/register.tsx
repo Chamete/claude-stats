@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Alerts, Mood, Pet, PetConfig, Sample, SaverMode, Tokens, Turn, Worker } from '../types'
+import type { Alerts, Counter, ModelInfo, Mood, Pet, PetConfig, Progress, Sample, SaverMode, ToolStat, Tokens, Turn, Worker } from '../types'
 import {
   FIVE_HOURS,
   NO_TOKENS,
@@ -16,6 +16,8 @@ import {
   fiveHour,
   forecast,
   layout,
+  modelFamily,
+  modelName,
   money,
   priceForecast,
   promptLine,
@@ -30,6 +32,8 @@ import {
   weekForecast,
 } from './format'
 import { face, look, moodColor, moodForTool, prop, saying } from './pet'
+import { ACHIEVEMENTS, NO_PROGRESS, bashKind, gain, levelOf, levelProgress, nextAchievement, title } from './progress'
+import { addAgentTokens, addCall, addStepOutput, ranking, resultTokens } from './tools'
 import { STATS_WIDTH, elapsed, enqueue, fit, isBusy, justArrived, orchestratorSaying, rowLayout, species, spinner, visibleWorkers, wire } from './team'
 
 const PANE = 'consumo'
@@ -44,11 +48,14 @@ const petConfig = atom({ plugin: 'consumo', key: 'petConfig' } as const, { isEna
 const frame = atom({ plugin: 'consumo', key: 'frame' } as const, 0)
 const workers = atom({ plugin: 'consumo', key: 'workers' } as const, [] as Worker[])
 const teamFrame = atom({ plugin: 'consumo', key: 'teamFrame' } as const, 0)
+const toolStats = atom({ plugin: 'consumo', key: 'toolStats' } as const, [] as ToolStat[])
+const progress = atom({ plugin: 'consumo', key: 'progress' } as const, NO_PROGRESS as Progress)
+const model = atom({ plugin: 'consumo', key: 'model' } as const, {} as ModelInfo)
 const alerts = atom({ plugin: 'consumo', key: 'alerts' } as const, { warned: 0, wasSaving: false } as Alerts)
 
 const MODES: Record<SaverMode, string> = {
   auto: `auto · se activa al ${SAVER_AT}%`,
-  on: 'siempre activo',
+  on: 'encendido',
   off: 'apagado',
 }
 
@@ -60,7 +67,14 @@ function level(pct: number): 'success' | 'warning' | 'error' {
   return pct >= 80 ? 'error' : pct >= 50 ? 'warning' : 'success'
 }
 
+/** Vuelve a leer el modelo de la sesión: cambia con /model, los botones del panel o un fallback. */
+async function syncModel($: EngineInterface) {
+  const id = await $.session.model()
+  await update($, model, mi => (mi.session === id ? mi : { ...mi, session: id }))
+}
+
 async function refresh($: EngineInterface) {
+  await syncModel($).catch(() => {})
   const [u, now, m, a] = await Promise.all([$.session.usage(), $.clock.now(), read($, mode), read($, alerts)])
   const five = fiveHour(u)
   const week = u.rateLimits.find(r => r.kind === 'seven_day')
@@ -69,7 +83,10 @@ async function refresh($: EngineInterface) {
 
   const t = threshold(u)
   if (t > a.warned) $.ui.toast(`⚠️ Llevas ${t}% de tu ventana de 5 h`)
-  if (saving && !a.wasSaving) $.ui.toast(`🌱 Modo ahorro activo: Opus → Sonnet 5.5 y esfuerzo medio`)
+  if (saving && !a.wasSaving) {
+    $.ui.toast(`🌱 Modo ahorro activo: Opus → Sonnet 5.5 y esfuerzo medio`)
+    await earn($, 'saver')
+  }
   if (!saving && a.wasSaving) $.ui.toast('Modo ahorro desactivado')
   const isReset = a.resetsAt !== undefined && five?.resetsAt !== undefined && five.resetsAt !== a.resetsAt
   if (isReset && a.warned > 0) $.ui.toast('🔄 Tu ventana de 5 h se ha reiniciado: vuelves a tener el 100%')
@@ -107,6 +124,28 @@ async function setMode($: EngineInterface, m: SaverMode) {
 async function setPet($: EngineInterface, mood: Mood, detail?: string) {
   const now = await $.clock.now()
   await update($, pet, () => ({ mood, detail, since: now }))
+}
+
+/** Suma experiencia; al subir de nivel o desbloquear un logro, la mascota lo celebra. */
+async function earn($: EngineInterface, counter: Counter) {
+  let g: ReturnType<typeof gain> | undefined
+  await update($, progress, p => {
+    g = gain(p, counter)
+    return g.progress
+  })
+  if (!g) return
+  await $.store.set('progress', g.progress)
+  const name = (await read($, petConfig)).name
+  for (const a of g.unlocked) $.ui.toast(`🏆 Logro: ${a.emoji} ${a.name} — ${a.hint}`)
+  if (g.levelUp) $.ui.toast(`⭐ ${name} sube al nivel ${g.levelUp}: ${title(g.levelUp)}`)
+  const last = g.unlocked[g.unlocked.length - 1]
+  if (g.levelUp) await setPet($, 'proud', `¡Nivel ${g.levelUp}! Ya soy ${title(g.levelUp)}`)
+  else if (last) await setPet($, 'proud', `¡Logro: ${last.emoji} ${last.name}!`)
+}
+
+async function caress($: EngineInterface) {
+  await setPet($, 'love')
+  await earn($, 'pets')
 }
 
 async function patchWorker($: EngineInterface, id: string, change: (w: Worker, now: number) => Worker) {
@@ -174,17 +213,20 @@ export const register: Register = on => {
     // Quita la línea de estado que dejaban las versiones anteriores.
     $.ui.status(undefined)
     // El historial, el modo y la mascota sobreviven entre sesiones.
-    const [stored, storedWeek, storedMode, storedPet, now] = await Promise.all([
+    const [stored, storedWeek, storedMode, storedPet, storedProgress, now] = await Promise.all([
       $.store.get('samples'),
       $.store.get('weekSamples'),
       $.store.get('mode'),
       $.store.get('petConfig'),
+      $.store.get('progress'),
       $.clock.now(),
     ])
     if (Array.isArray(stored)) await update($, samples, list => (list.length ? list : (stored as Sample[])))
     if (Array.isArray(storedWeek)) await update($, weekSamples, list => (list.length ? list : (storedWeek as Sample[])))
     if (storedMode === 'auto' || storedMode === 'on' || storedMode === 'off') await update($, mode, () => storedMode)
     if (storedPet && typeof storedPet === 'object') await update($, petConfig, c => ({ ...c, ...(storedPet as PetConfig) }))
+    if (storedProgress && typeof storedProgress === 'object')
+      await update($, progress, p => (p.xp > 0 ? p : { ...NO_PROGRESS, ...(storedProgress as Progress) }))
     // La mascota se llamaba Clau antes de la 0.5.0.
     if ((await read($, petConfig)).name === 'Clau') await setPetConfig($, { name: PET_NAME })
     await update($, pet, p => (p.since === 0 ? { mood: 'idle' as const, since: now } : p))
@@ -197,8 +239,8 @@ export const register: Register = on => {
     })
     await $.command.register({
       name: 'mascota',
-      description: 'Mascota: on, off o nombre <nuevo nombre>',
-      argumentHint: '[on|off|nombre <nombre>]',
+      description: 'Mascota: on, off, logros o nombre <nuevo nombre>',
+      argumentHint: '[on|off|logros|nombre <nombre>]',
     })
     await refresh($)
     $.clock.every(60_000, () => void refresh($).catch(() => {}))
@@ -243,8 +285,19 @@ export const register: Register = on => {
       await setPet($, 'love')
       return { text: `Tu mascota ahora se llama ${name}.` }
     }
-    const c = await read($, petConfig)
-    return { text: `${c.name} está ${c.isEnabled ? 'visible' : 'oculta'}. Usa /mascota on|off|nombre <nombre>.` }
+    const [c, pr] = await Promise.all([read($, petConfig), read($, progress)])
+    const lv = levelOf(pr.xp)
+    if (cmd === 'logros') {
+      const lines = ACHIEVEMENTS.map(a => {
+        const isDone = pr.unlocked.includes(a.id)
+        const count = Math.min(a.goal, pr.counters[a.counter] ?? 0)
+        return `${isDone ? a.emoji : '🔒'} ${a.name} — ${a.hint}${isDone ? '' : ` (${count}/${a.goal})`}`
+      })
+      return { text: [`${c.name} · nivel ${lv} ${title(lv)} · ${pr.xp} XP · ${pr.unlocked.length}/${ACHIEVEMENTS.length} logros`, ...lines].join('\n') }
+    }
+    return {
+      text: `${c.name} (nivel ${lv}, ${title(lv)}) está ${c.isEnabled ? 'visible' : 'oculta'}. Usa /mascota on|off|logros|nombre <nombre>.`,
+    }
   })
 
   // Cada prompt tuyo: lo que marcaba la ventana al empezar.
@@ -261,6 +314,7 @@ export const register: Register = on => {
     }
     await update($, turns, list => [...list, turn].slice(-30))
     await setPet($, 'thinking')
+    await earn($, 'turns')
     return next(e)
   })
 
@@ -281,6 +335,7 @@ export const register: Register = on => {
         parentId: e.parentAgentId,
       }
       await update($, workers, ws => [...ws.filter(x => x.id !== w.id), w].slice(-20))
+      await earn($, 'agents')
     }
     return r
   }).catch(($, e, next) => next(e)) // observar nunca impide que arranque
@@ -290,8 +345,11 @@ export const register: Register = on => {
     const agentId = e.agentId
     if (agentId) await patchWorker($, agentId, w => (w.status === 'running' ? { ...w, mood, detail } : w))
     else await setPet($, mood, detail)
+    const started = await $.clock.now()
     const r = await next(e)
     const after: Mood = r.isError ? 'error' : 'thinking'
+    const ms = (await $.clock.now()) - started
+    await update($, toolStats, list => addCall(list, e.tool, ms, resultTokens(r.result), r.isError === true || r.deny !== undefined))
     // El subagente informa al orquestador de cada paso, si el cable está libre.
     if (agentId) {
       await patchWorker($, agentId, (w, now) =>
@@ -306,6 +364,14 @@ export const register: Register = on => {
       )
     }
     else await setPet($, after)
+    // La experiencia, después de la cara: si sube de nivel, se le ve orgullosa.
+    if (r.deny === undefined) {
+      await earn($, r.isError ? 'errors' : 'tools')
+      if (!r.isError && (e.tool === 'WebSearch' || e.tool === 'WebFetch')) await earn($, 'web')
+      const command = (e as { command?: unknown }).command
+      const kind = !r.isError && e.tool === 'Bash' && typeof command === 'string' ? bashKind(command) : undefined
+      if (kind) await earn($, kind)
+    }
     return r
   }).catch(($, e, next) => next(e)) // la mascota nunca bloquea una herramienta
 
@@ -339,6 +405,10 @@ export const register: Register = on => {
       await update($, tokens, t => addTokens(t, usage))
       const agentId = e.agentId
       if (agentId) await patchWorker($, agentId, w => ({ ...w, tokens: w.tokens + totalTokens(usage) }))
+      // Por herramienta: lo de un subagente va a Agent; la salida de un paso, a lo que pidió.
+      await update($, toolStats, list =>
+        agentId ? addAgentTokens(list, totalTokens(usage)) : addStepOutput(list, r.toolUses.map(t => t.name), usage.output_tokens),
+      )
       await update($, turns, all =>
         all.map(t => (t.turnId === e.turnId ? { ...t, tokens: t.tokens + totalTokens(usage) } : t)),
       )
@@ -351,13 +421,15 @@ export const register: Register = on => {
     const c = await read($, petConfig)
     if (e.props.hasSurvey || !c.isEnabled) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
-    const [p, f, now, m, ws] = await Promise.all([
+    const [p, f, now, m, ws, pr] = await Promise.all([
       read($, pet),
       read($, frame),
       $.clock.now(),
       read($, mode),
       read($, workers),
+      read($, progress),
     ])
+    const lv = levelOf(pr.xp)
     const team = visibleWorkers(ws, now)
     const running = team.filter(w => w.status === 'running').length
     const coordinating = running > 0 && (p.mood === 'thinking' || p.mood === 'agent' || p.mood === 'idle')
@@ -377,7 +449,7 @@ export const register: Register = on => {
             {said}
           </Text>
           {energy !== undefined && <Text color={level(100 - energy)}>{energy}%</Text>}
-          <Button key="acariciar" label="♥" plain dimColor onPress={() => setPet($, 'love')} />
+          <Button key="acariciar" label="♥" plain dimColor onPress={() => caress($)} />
         </Box>
       )
     }
@@ -393,6 +465,7 @@ export const register: Register = on => {
           <Box flexDirection="row" gap={1}>
             <Text color={color}>{prop(l, f).padEnd(3)}</Text>
             <Text bold>{c.name}</Text>
+            <Text color="warning">{`Nv ${lv}`}</Text>
             <Text color={color}>{said}</Text>
           </Box>
           <Box flexDirection="row" gap={1}>
@@ -407,7 +480,7 @@ export const register: Register = on => {
             )}
             {energy !== undefined && <Text dimColor>{energy}%</Text>}
             {saverActive(m, lastPct) && <Text color="success">🌱</Text>}
-            <Button key="acariciar" label="♥" plain dimColor onPress={() => setPet($, 'love')} />
+            <Button key="acariciar" label="♥" plain dimColor onPress={() => caress($)} />
           </Box>
           {team.length > 0 && (
             <Box flexDirection="row" gap={1}>
@@ -430,7 +503,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    const [u, now, list, weekList, m, tok, turnList, ws, tf, p] = await Promise.all([
+    const [u, now, list, weekList, m, tok, turnList, ws, tf, p, ts, pr, mi] = await Promise.all([
       $.session.usage(),
       $.clock.now(),
       read($, samples),
@@ -441,7 +514,11 @@ export const register: Register = on => {
       read($, workers),
       read($, teamFrame),
       read($, pet),
+      read($, toolStats),
+      read($, progress),
+      read($, model),
     ])
+    const pc0 = await read($, petConfig)
     const bodyWidth = e.props.bodyColumns || e.viewport?.columns || 60
     const L = layout(e.props.bodyColumns || e.viewport?.columns || 60, e.viewport?.rows ?? 40)
     const { inner } = L
@@ -607,7 +684,7 @@ export const register: Register = on => {
       </Text>,
     )
 
-    const pr = promptRow(inner, L.isCompact)
+    const prow = promptRow(inner, L.isCompact)
     const turnsCard = card(
       'turns',
       '💬  Últimos prompts',
@@ -622,26 +699,93 @@ export const register: Register = on => {
             <Text bold color={!t.isDone ? 'claude' : delta >= 5 ? 'error' : delta >= 2 ? 'warning' : 'success'}>
               {turnCost(t).padStart(6)}{' '}
             </Text>
-            {pr.showPrice && <Text color="warning">{(p === undefined ? '' : money(p)).padStart(7)} </Text>}
-            {pr.showTokens && <Text dimColor>{compact(t.tokens).padStart(5)} </Text>}
-            <Text wrap="truncate">{promptLine(t.text, pr.textWidth)}</Text>
+            {prow.showPrice && <Text color="warning">{(p === undefined ? '' : money(p)).padStart(7)} </Text>}
+            {prow.showTokens && <Text dimColor>{compact(t.tokens).padStart(5)} </Text>}
+            <Text wrap="truncate">{promptLine(t.text, prow.textWidth)}</Text>
           </Box>
         )
       }),
     )
 
+    // El modelo: el de la sesión y, si el ahorro lo cambia, el que responde de verdad.
+    const sessionModel = mi.session
+    const effective = saving ? (downgrade(sessionModel ?? '', undefined)?.model ?? sessionModel) : sessionModel
+    const isRedirected = modelFamily(effective) !== modelFamily(sessionModel)
     const saverCard = card(
       'saver',
-      '🌱  Modo ahorro',
+      '🧠  Modelo y ahorro',
       saving ? 'success' : 'subtle',
+      <Box flexDirection="row" gap={1} width={inner} overflow="hidden">
+        <Text dimColor>Modelo</Text>
+        <Text bold color={isRedirected ? 'success' : 'claude'} wrap="truncate">
+          {modelName(effective)}
+        </Text>
+        {isRedirected && <Text color="success">🌱</Text>}
+      </Box>,
       <Text color={saving ? 'success' : undefined} dimColor={!saving}>
         {saving ? `Activo: Opus → ${SAVER_MODEL}${L.isCompact ? '' : ', esfuerzo medio'}` : `Inactivo (${MODES[m]})`}
       </Text>,
-      <Box flexDirection="row" flexWrap="wrap" gap={1} marginTop={1}>
+      <Box flexDirection="row" flexWrap="wrap" gap={1}>
         <Button key="modo-auto" hotkey="a" label="Auto" variant={m === 'auto' ? 'primary' : undefined} onPress={() => setMode($, 'auto')} />
-        <Button key="modo-on" hotkey="s" label="Siempre" variant={m === 'on' ? 'primary' : undefined} onPress={() => setMode($, 'on')} />
+        <Button key="modo-on" hotkey="e" label="Encendido" variant={m === 'on' ? 'primary' : undefined} onPress={() => setMode($, 'on')} />
         <Button key="modo-off" hotkey="o" label="Apagado" variant={m === 'off' ? 'primary' : undefined} onPress={() => setMode($, 'off')} />
       </Box>,
+    )
+
+    // Qué herramientas se llevan los tokens: la salida que las pidió más lo que devolvieron.
+    const ranked = ranking(ts).slice(0, L.promptRows)
+    const nameWidth = Math.min(14, Math.max(6, ...ranked.map(x => x.stat.name.length)))
+    const toolBar = Math.max(4, Math.min(16, inner - nameWidth - (L.isCompact ? 12 : 26)))
+    const toolsCard = card(
+      'tools',
+      '🧰  Por herramienta',
+      'remember',
+      ranked.length === 0 && <Text dimColor>Aún no se ha usado ninguna herramienta.</Text>,
+      ...ranked.map(({ stat, tokens: n, share }) => {
+        const filled = Math.round((share / 100) * toolBar)
+        return (
+          <Box key={`tool-${stat.name}`} flexDirection="row" width={inner} overflow="hidden">
+            <Text bold wrap="truncate">
+              {fitName(stat.name, nameWidth).padEnd(nameWidth)}{' '}
+            </Text>
+            <Text color="remember">{'█'.repeat(filled)}</Text>
+            <Text dimColor>{'░'.repeat(toolBar - filled)}</Text>
+            <Text>{`${share}%`.padStart(5)}</Text>
+            <Text dimColor>{compact(n).padStart(6)}</Text>
+            {!L.isCompact && <Text dimColor>{` ×${stat.calls}`.padEnd(6)}</Text>}
+            {!L.isCompact && stat.errors > 0 && <Text color="error">{` ✗${stat.errors}`}</Text>}
+          </Box>
+        )
+      }),
+      ranked.length > 0 && !L.isCompact && <Text dimColor>Tokens = salida que las pidió + lo que devolvieron (≈).</Text>,
+    )
+
+    // La mascota: nivel, experiencia y logros.
+    const lv = levelOf(pr.xp)
+    const nextA = nextAchievement(pr)
+    const petCard = card(
+      'pet',
+      `🏆  ${pc0.name}`,
+      'warning',
+      <Box flexDirection="row" justifyContent="space-between" width={inner}>
+        <Text bold color="warning">
+          {`Nivel ${lv} · ${title(lv)}`}
+        </Text>
+        <Text dimColor>{pr.xp} XP</Text>
+      </Box>,
+      <Box flexDirection="row" gap={1}>
+        {meter(levelProgress(pr.xp), Math.max(6, inner - 6))}
+        <Text dimColor>{`${levelProgress(pr.xp)}%`.padStart(4)}</Text>
+      </Box>,
+      <Text wrap="truncate">
+        {pr.unlocked.length}/{ACHIEVEMENTS.length} logros{' '}
+        {ACHIEVEMENTS.filter(a => pr.unlocked.includes(a.id)).map(a => a.emoji).join(' ')}
+      </Text>,
+      nextA && (
+        <Text dimColor wrap="truncate">
+          Próximo: {nextA.a.name} — {nextA.a.hint} ({Math.min(nextA.count, nextA.a.goal)}/{nextA.a.goal})
+        </Text>
+      ),
     )
 
     // El equipo: el orquestador arriba y un cable animado hasta cada subagente.
@@ -655,7 +799,7 @@ export const register: Register = on => {
     const teamWidth = Math.min(bodyWidth, Math.max(L.cardWidth, 100))
     // Ancho útil de una fila: la tarjeta menos borde y margen.
     const rowWidth = Math.max(20, teamWidth - 4)
-    const pc = await read($, petConfig)
+    const pc = pc0
     const caught = team.find(w => justArrived(w.packets, 'result', now))
     const reported = team.find(w => justArrived(w.packets, 'progress', now))
     const boss = caught ? 'happy' : running > 0 ? 'agent' : look(p, now, lastPct)
@@ -746,16 +890,16 @@ export const register: Register = on => {
     const columns =
       L.columns === 3
         ? [
-            [fiveCard, weekCard],
-            [priceCard, tokenCard],
+            [fiveCard, weekCard, toolsCard],
+            [priceCard, tokenCard, petCard],
             [turnsCard, saverCard],
           ]
         : L.columns === 2
           ? [
-              [fiveCard, weekCard, saverCard],
-              [priceCard, tokenCard, turnsCard],
+              [fiveCard, weekCard, saverCard, petCard],
+              [priceCard, tokenCard, turnsCard, toolsCard],
             ]
-          : [[fiveCard, priceCard, weekCard, tokenCard, turnsCard, saverCard]]
+          : [[fiveCard, priceCard, weekCard, tokenCard, toolsCard, turnsCard, saverCard, petCard]]
 
     return (
       <Box flexDirection="column">
@@ -770,4 +914,8 @@ export const register: Register = on => {
       </Box>
     )
   })
+}
+
+function fitName(name: string, width: number): string {
+  return name.length > width ? `${name.slice(0, width - 1)}…` : name
 }

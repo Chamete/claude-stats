@@ -34,6 +34,9 @@ export type Mood =
   | 'happy'
   | 'surprised'
   | 'love'
+  | 'git'
+  | 'testing'
+  | 'proud'
 
 export type Pet = { mood: Mood; detail?: string; since: number }
 
@@ -62,6 +65,27 @@ export type Worker = {
   parentId?: string
 }
 
+/** Lo que gasta una herramienta en la sesión. */
+export type ToolStat = {
+  name: string
+  calls: number
+  errors: number
+  /** Tokens que el modelo escribió para pedirla (la salida del paso, repartida). */
+  outTokens: number
+  /** Tokens aproximados que su resultado añadió al contexto. */
+  resultTokens: number
+  /** Tiempo total ejecutándose. */
+  ms: number
+}
+
+/** Contadores de la mascota: experiencia y logros, guardados entre sesiones. */
+export type Counter = 'turns' | 'tools' | 'agents' | 'commits' | 'tests' | 'pets' | 'saver' | 'errors' | 'web'
+
+export type Progress = { xp: number; counters: Partial<Record<Counter, number>>; unlocked: string[] }
+
+/** El modelo de la sesión, como lo muestra /model. */
+export type ModelInfo = { session?: string }
+
 /** Avisos ya dados, para no repetirlos tras una recarga. */
 export type Alerts = { warned: number; wasSaving: boolean; resetsAt?: string }
 
@@ -79,6 +103,9 @@ declare module 'claude-code' {
       alerts: Alerts
       workers: Worker[]
       teamFrame: number
+      toolStats: ToolStat[]
+      progress: Progress
+      model: ModelInfo
     }
   }
 }
