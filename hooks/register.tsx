@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Alerts, Counter, ModelInfo, Mood, Pet, PetConfig, Progress, Sample, SaverMode, ToolStat, Tokens, Turn, Worker } from '../types'
+import type { Alerts, CardId, CardLayout, Counter, ModelInfo, Mood, Pet, PetConfig, Progress, Sample, SaverMode, ToolStat, Tokens, Turn, Worker } from '../types'
 import {
   FIVE_HOURS,
   NO_TOKENS,
@@ -33,6 +33,7 @@ import {
 } from './format'
 import { face, look, moodColor, moodForTool, prop, saying } from './pet'
 import { ACHIEVEMENTS, NO_PROGRESS, bashKind, gain, levelOf, levelProgress, nextAchievement, title } from './progress'
+import { CARDS, DEFAULT_LAYOUT, arrange, cardId, cardInfo, move, normalize, reorder, toggle } from './cards'
 import { addAgentTokens, addCall, addStepOutput, ranking, resultTokens } from './tools'
 import { STATS_WIDTH, elapsed, enqueue, fit, isBusy, justArrived, orchestratorSaying, rowLayout, species, spinner, visibleWorkers, wire } from './team'
 
@@ -51,6 +52,8 @@ const teamFrame = atom({ plugin: 'consumo', key: 'teamFrame' } as const, 0)
 const toolStats = atom({ plugin: 'consumo', key: 'toolStats' } as const, [] as ToolStat[])
 const progress = atom({ plugin: 'consumo', key: 'progress' } as const, NO_PROGRESS as Progress)
 const model = atom({ plugin: 'consumo', key: 'model' } as const, {} as ModelInfo)
+const cards = atom({ plugin: 'consumo', key: 'cards' } as const, DEFAULT_LAYOUT as CardLayout)
+const isEditing = atom({ plugin: 'consumo', key: 'isEditing' } as const, false)
 const alerts = atom({ plugin: 'consumo', key: 'alerts' } as const, { warned: 0, wasSaving: false } as Alerts)
 
 const MODES: Record<SaverMode, string> = {
@@ -143,6 +146,19 @@ async function earn($: EngineInterface, counter: Counter) {
   else if (last) await setPet($, 'proud', `¡Logro: ${last.emoji} ${last.name}!`)
 }
 
+async function setCards($: EngineInterface, change: (c: CardLayout) => CardLayout) {
+  const next = change(await read($, cards))
+  await update($, cards, () => next)
+  await $.store.set('cards', next)
+}
+
+/** El orden actual, en una línea: «1 🏆 Progreso · 2 ⏱ Ventana de 5 h (oculta) …». */
+function describeCards(c: CardLayout): string {
+  return c.order
+    .map((id, i) => `${i + 1} ${cardInfo(id).emoji} ${cardInfo(id).name}${c.hidden.includes(id) ? ' (oculta)' : ''}`)
+    .join(' · ')
+}
+
 async function caress($: EngineInterface) {
   await setPet($, 'love')
   await earn($, 'pets')
@@ -213,12 +229,13 @@ export const register: Register = on => {
     // Quita la línea de estado que dejaban las versiones anteriores.
     $.ui.status(undefined)
     // El historial, el modo y la mascota sobreviven entre sesiones.
-    const [stored, storedWeek, storedMode, storedPet, storedProgress, now] = await Promise.all([
+    const [stored, storedWeek, storedMode, storedPet, storedProgress, storedCards, now] = await Promise.all([
       $.store.get('samples'),
       $.store.get('weekSamples'),
       $.store.get('mode'),
       $.store.get('petConfig'),
       $.store.get('progress'),
+      $.store.get('cards'),
       $.clock.now(),
     ])
     if (Array.isArray(stored)) await update($, samples, list => (list.length ? list : (stored as Sample[])))
@@ -227,6 +244,7 @@ export const register: Register = on => {
     if (storedPet && typeof storedPet === 'object') await update($, petConfig, c => ({ ...c, ...(storedPet as PetConfig) }))
     if (storedProgress && typeof storedProgress === 'object')
       await update($, progress, p => (p.xp > 0 ? p : { ...NO_PROGRESS, ...(storedProgress as Progress) }))
+    if (storedCards && typeof storedCards === 'object') await update($, cards, () => normalize(storedCards as Partial<CardLayout>))
     // La mascota se llamaba Clau antes de la 0.5.0.
     if ((await read($, petConfig)).name === 'Clau') await setPetConfig($, { name: PET_NAME })
     await update($, pet, p => (p.since === 0 ? { mood: 'idle' as const, since: now } : p))
@@ -236,6 +254,11 @@ export const register: Register = on => {
       name: 'ahorro',
       description: 'Modo ahorro: auto, on u off (sin argumento muestra el estado)',
       argumentHint: '[auto|on|off]',
+    })
+    await $.command.register({
+      name: 'tarjetas',
+      description: 'Ordena u oculta las tarjetas de /consumo: orden, ocultar, mostrar, restablecer',
+      argumentHint: '[orden <tarjetas…>|ocultar <tarjeta>|mostrar <tarjeta>|restablecer]',
     })
     await $.command.register({
       name: 'mascota',
@@ -271,6 +294,32 @@ export const register: Register = on => {
     const m = await read($, mode)
     const state = saverActive(m, lastPct) ? 'activo ahora' : 'inactivo ahora'
     return { text: `Modo ahorro: ${MODES[m]} — ${state}. Usa /ahorro auto|on|off.` }
+  })
+
+  on('command.run', { command: 'tarjetas' }, async ($, e) => {
+    const [cmd = '', ...rest] = e.args.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    const names = CARDS.map(c => c.aliases[0]).join(', ')
+    const ids = rest.map(cardId)
+    const unknown = rest.filter((_, i) => !ids[i])
+    if (unknown.length) return { text: `No conozco: ${unknown.join(', ')}. Las tarjetas son: ${names}.` }
+    const found = ids.filter((id): id is CardId => id !== undefined)
+    if (cmd === 'restablecer') {
+      await setCards($, () => DEFAULT_LAYOUT)
+      return { text: `Tarjetas como venían: ${describeCards(DEFAULT_LAYOUT)}.` }
+    }
+    if (cmd === 'orden' && found.length) {
+      await setCards($, c => reorder(c, found))
+    } else if ((cmd === 'ocultar' || cmd === 'mostrar') && found.length) {
+      await setCards($, c => ({
+        ...c,
+        hidden: cmd === 'ocultar' ? [...new Set([...c.hidden, ...found])] : c.hidden.filter(h => !found.includes(h)),
+      }))
+    } else if (cmd) {
+      return {
+        text: `Usa /tarjetas orden <tarjetas…>, ocultar <tarjeta>, mostrar <tarjeta> o restablecer. Las tarjetas son: ${names}. También puedes pulsar «⚙ Personalizar» en /consumo.`,
+      }
+    }
+    return { text: `Tarjetas: ${describeCards(await read($, cards))}.` }
   })
 
   on('command.run', { command: 'mascota' }, async ($, e) => {
@@ -503,7 +552,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    const [u, now, list, weekList, m, tok, turnList, ws, tf, p, ts, pr, mi] = await Promise.all([
+    const [u, now, list, weekList, m, tok, turnList, ws, tf, p, ts, pr, mi, layoutCards, editing] = await Promise.all([
       $.session.usage(),
       $.clock.now(),
       read($, samples),
@@ -517,6 +566,8 @@ export const register: Register = on => {
       read($, toolStats),
       read($, progress),
       read($, model),
+      read($, cards),
+      read($, isEditing),
     ])
     const pc0 = await read($, petConfig)
     const bodyWidth = e.props.bodyColumns || e.viewport?.columns || 60
@@ -739,7 +790,7 @@ export const register: Register = on => {
     const toolBar = Math.max(4, Math.min(16, inner - nameWidth - (L.isCompact ? 12 : 26)))
     const toolsCard = card(
       'tools',
-      '🧰  Por herramienta',
+      '🧰  Tokens por herramienta',
       'remember',
       ranked.length === 0 && <Text dimColor>Aún no se ha usado ninguna herramienta.</Text>,
       ...ranked.map(({ stat, tokens: n, share }) => {
@@ -887,31 +938,89 @@ export const register: Register = on => {
       </Box>
     )
 
-    // Columnas según el ancho: lo más urgente siempre arriba a la izquierda.
-    const columns =
-      L.columns === 3
-        ? [
-            [fiveCard, weekCard, toolsCard],
-            [priceCard, tokenCard, petCard],
-            [turnsCard, saverCard],
-          ]
-        : L.columns === 2
-          ? [
-              [fiveCard, weekCard, saverCard, petCard],
-              [priceCard, tokenCard, turnsCard, toolsCard],
-            ]
-          : [[fiveCard, priceCard, weekCard, tokenCard, toolsCard, turnsCard, saverCard, petCard]]
+    // Columnas según el ancho y el orden que haya elegido cada persona.
+    const byId: Record<CardId, JSX.Element> = {
+      five: fiveCard,
+      price: priceCard,
+      week: weekCard,
+      tokens: tokenCard,
+      tools: toolsCard,
+      turns: turnsCard,
+      saver: saverCard,
+      pet: petCard,
+    }
+    const columns = arrange(layoutCards, L.columns).map(ids => ids.map(id => byId[id]))
+    const isEmpty = columns.every(c => c.length === 0)
+
+    // El editor: cada tarjeta con sus botones para moverla y ocultarla.
+    const editorWidth = Math.min(bodyWidth, Math.max(L.cardWidth, 56))
+    const rowNameWidth = Math.max(...CARDS.map(c => c.name.length)) + 1
+    const editor = editing && (
+      <Box key="editor" flexDirection="column" borderStyle="round" borderColor="suggestion" paddingX={1} width={editorWidth}>
+        <Text bold color="suggestion">
+          ⚙  Personalizar tarjetas
+        </Text>
+        <Text dimColor wrap="truncate">
+          Se colocan de izquierda a derecha y de arriba abajo.
+        </Text>
+        {layoutCards.order.map((id, i) => {
+          const info = cardInfo(id)
+          const isHidden = layoutCards.hidden.includes(id)
+          return (
+            <Box key={`fila-${id}`} flexDirection="row" gap={1}>
+              <Text dimColor>{String(i + 1).padStart(2)}</Text>
+              {/* Columnas de ancho fijo: los emojis no miden lo mismo y los botones quedarían torcidos. */}
+              <Box width={3}>
+                <Text dimColor={isHidden}>{info.emoji}</Text>
+              </Box>
+              <Box width={rowNameWidth}>
+                <Text bold={!isHidden} dimColor={isHidden} wrap="truncate">
+                  {info.name}
+                </Text>
+              </Box>
+              {i > 0 ? (
+                <Button key={`subir-${id}`} label="↑" onPress={() => setCards($, c => move(c, id, -1))} />
+              ) : (
+                <Text>{'     '}</Text>
+              )}
+              {i < layoutCards.order.length - 1 ? (
+                <Button key={`bajar-${id}`} label="↓" onPress={() => setCards($, c => move(c, id, 1))} />
+              ) : (
+                <Text>{'     '}</Text>
+              )}
+              <Button
+                key={`ver-${id}`}
+                label={isHidden ? 'Mostrar' : 'Ocultar'}
+                variant={isHidden ? 'primary' : undefined}
+                onPress={() => setCards($, c => toggle(c, id))}
+              />
+            </Box>
+          )
+        })}
+        <Box flexDirection="row" gap={1} marginTop={1}>
+          <Button key="tarjetas-listo" hotkey="l" label="Listo" variant="primary" onPress={() => update($, isEditing, () => false)} />
+          <Button key="tarjetas-restablecer" hotkey="r" label="Restablecer" onPress={() => setCards($, () => DEFAULT_LAYOUT)} />
+        </Box>
+      </Box>
+    )
 
     return (
       <Box flexDirection="column">
         {teamCard}
+        {editor}
+        {isEmpty && <Text dimColor>Todas las tarjetas están ocultas: pulsa «⚙ Personalizar» o usa /tarjetas mostrar.</Text>}
         <Box flexDirection="row" gap={1}>
-          {columns.map((cards, i) => (
+          {columns.map((cs, i) => (
             <Box key={`col-${i}`} flexDirection="column">
-              {cards}
+              {cs}
             </Box>
           ))}
         </Box>
+        {!editing && (
+          <Box flexDirection="row">
+            <Button key="personalizar" label="⚙ Personalizar" plain dimColor onPress={() => update($, isEditing, () => true)} />
+          </Box>
+        )}
       </Box>
     )
   })

@@ -40,7 +40,7 @@ Para actualizar a la última versión: `claude plugin update consumo` y después
 | 💲 Precio | Coste de la sesión (equivalente a precios de API), por hora, por prompt, el último, y proyección hasta el reinicio |
 | 🔢 Tokens | Entrada, salida, caché leída y escrita, y % servido desde caché |
 | 💬 Últimos prompts | Cuánto % de la ventana, tokens y precio gastó cada prompt |
-| 🧰 Por herramienta | Qué herramientas se llevan los tokens de la sesión (Read, Bash, Agent, cada servidor MCP…): % del total, tokens, llamadas y errores |
+| 🧰 Tokens por herramienta | Qué herramientas se llevan los tokens de la sesión (Read, Bash, Agent, cada servidor MCP…): % del total, tokens, llamadas y errores |
 | 🧠 Modelo y ahorro | El modelo que responde ahora (con 🌱 si el modo ahorro lo ha cambiado) y botones para el modo ahorro |
 | 🏆 Mascota | Nivel, experiencia hasta el siguiente y logros conseguidos |
 | 🤖 Equipo | Aparece cuando hay subagentes: uno por subagente, con cables animados por los que viajan las tareas, el progreso y los resultados |
@@ -48,6 +48,21 @@ Para actualizar a la última versión: `claude plugin update consumo` y después
 ![Equipo de subagentes](docs/subagentes.png)
 
 El panel se adapta al ancho (1, 2 o 3 columnas) y al alto de la terminal.
+
+#### Personalizar las tarjetas
+
+Pulsa **⚙ Personalizar** al pie del panel: cada tarjeta tiene
+botones **↑ ↓** para moverla y **Ocultar / Mostrar**, y el panel cambia al
+momento. Con un orden propio las tarjetas se colocan de izquierda a derecha y
+de arriba abajo. Tu disposición se guarda en tu equipo y se mantiene entre
+sesiones.
+
+También escribiendo:
+
+- `/tarjetas` — el orden actual
+- `/tarjetas orden progreso 5h semana precio tokens herramientas prompts modelo` — las que nombres van primero, en ese orden
+- `/tarjetas ocultar tokens` / `/tarjetas mostrar tokens`
+- `/tarjetas restablecer` — como venían
 
 ### Modo ahorro `/ahorro`
 

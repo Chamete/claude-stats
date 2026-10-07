@@ -86,6 +86,12 @@ export type Progress = { xp: number; counters: Partial<Record<Counter, number>>;
 /** El modelo de la sesión, como lo muestra /model. */
 export type ModelInfo = { session?: string }
 
+/** Las tarjetas del panel. */
+export type CardId = 'five' | 'price' | 'week' | 'tokens' | 'tools' | 'turns' | 'saver' | 'pet'
+
+/** Cómo quiere cada persona su panel: el orden de las tarjetas y las que oculta. */
+export type CardLayout = { order: CardId[]; hidden: CardId[] }
+
 /** Avisos ya dados, para no repetirlos tras una recarga. */
 export type Alerts = { warned: number; wasSaving: boolean; resetsAt?: string }
 
@@ -106,6 +112,8 @@ declare module 'claude-code' {
       toolStats: ToolStat[]
       progress: Progress
       model: ModelInfo
+      cards: CardLayout
+      isEditing: boolean
     }
   }
 }
