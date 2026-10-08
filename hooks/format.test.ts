@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { addTokens, cacheHit, compact, layout, money, NO_TOKENS, priceForecast, promptLine, promptRow, threshold, turnCost, turnPrice, untilReset, weekForecast , modelFamily, modelName } from './format'
+import { addTokens, cacheHit, compact, layout, money, NO_TOKENS, priceForecast, promptLine, promptRow, threshold, turnCost, turnPrice, untilReset, weekForecast , modelFamily, modelName, recentPrompts } from './format'
 
 const now = Date.parse('2026-10-06T10:00:00Z')
 
@@ -95,4 +95,11 @@ test('nombres de modelo legibles', () => {
   expect(modelName('opus')).toBe('Opus')
   expect(modelName(undefined)).toBe('—')
   expect(modelFamily('claude-fable-5-1')).toBe('fable')
+})
+
+test('últimos prompts: como mucho 5, del más reciente al más antiguo', () => {
+  const turns = Array.from({ length: 8 }, (_, i) => ({ turnId: `t${i}`, text: `p${i}`, startedAt: i, tokens: 0, isDone: true }))
+  expect(recentPrompts(turns, 10).map(t => t.turnId)).toEqual(['t7', 't6', 't5', 't4', 't3'])
+  expect(recentPrompts(turns, 3).map(t => t.turnId)).toEqual(['t7', 't6', 't5'])
+  expect(recentPrompts(turns.slice(0, 2), 10).map(t => t.turnId)).toEqual(['t1', 't0'])
 })

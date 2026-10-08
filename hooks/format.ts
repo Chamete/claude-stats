@@ -233,6 +233,14 @@ export function turnCost(t: Turn): string {
   return d < 0 ? '↻' : `+${d}%`
 }
 
+/** Cuántos prompts recientes enseña como mucho la tarjeta de últimos prompts. */
+export const MAX_PROMPTS = 5
+
+/** Los últimos prompts, del más reciente al más antiguo, sin pasar de `MAX_PROMPTS` ni de lo que quepa. */
+export function recentPrompts(turns: Turn[], fits: number): Turn[] {
+  return turns.slice(-Math.min(MAX_PROMPTS, fits)).reverse()
+}
+
 /** Columnas de una fila de prompt: % (6), precio (7) y tokens (5), cada uno con su espacio. */
 export function promptRow(inner: number, isCompact: boolean) {
   // Cada columna solo si cabe dejando sitio al texto.

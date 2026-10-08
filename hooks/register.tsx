@@ -23,6 +23,7 @@ import {
   priceForecast,
   promptLine,
   promptRow,
+  recentPrompts,
   saverActive,
   sparkline,
   threshold,
@@ -614,7 +615,7 @@ export const register: Register = on => {
     const saving = saverActive(m, five?.percentUsed, sAt)
     const fc = five && forecast(list, five.percentUsed, five.resetsAt, now)
     const weekFc = week && weekForecast(week.percentUsed, week.resetsAt, now)
-    const recent = turnList.slice(-L.promptRows).reverse()
+    const recent = recentPrompts(turnList, L.promptRows)
     const usd = u.cost?.usd
     const price = usd === undefined ? undefined : priceForecast(usd, u.startedAt, now, five?.resetsAt, turnList)
     const lastPrice = [...turnList].reverse().map(turnPrice).find(p => p !== undefined)
