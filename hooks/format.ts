@@ -323,3 +323,13 @@ export function layout(width: number, height: number): Layout {
   const promptRows = Math.max(3, Math.min(10, isShort ? 3 : Math.floor((height - (columns === 1 ? 40 : 20)) / 2) + 4))
   return { columns, cardWidth, inner, isCompact, isShort, promptRows }
 }
+
+/** Verde, amarillo o rojo según lo gastado. */
+export function level(pct: number): 'success' | 'warning' | 'error' {
+  return pct >= 80 ? 'error' : pct >= 50 ? 'warning' : 'success'
+}
+
+/** El modo ahorro en una frase, con el umbral que toque. */
+export function modeText(m: SaverMode, at: number): string {
+  return m === 'auto' ? `auto · se activa al ${at}%` : m === 'on' ? 'encendido' : 'apagado'
+}
