@@ -1,43 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Alerts, CardId, CardLayout, Counter, ModelInfo, Mood, Pet, PetConfig, Progress, Sample, SaverMode, ToolStat, Tokens, Turn, Worker } from '../types'
-import {
-  FIVE_HOURS,
-  NO_TOKENS,
-  SAVER_AT,
-  SAVER_MODEL,
-  WEEK,
-  addSample,
-  addTokens,
-  cacheHit,
-  compact,
-  downgrade,
-  duration,
-  fiveHour,
-  forecast,
-  layout,
-  modelFamily,
-  modelName,
-  money,
-  parseSaverAt,
-  priceForecast,
-  promptLine,
-  promptRow,
-  recentPrompts,
-  saverActive,
-  sparkline,
-  threshold,
-  totalTokens,
-  turnCost,
-  turnPrice,
-  untilReset,
-  weekForecast,
-} from './format'
-import { face, look, moodColor, moodForTool, prop, saying } from './pet'
-import { ACHIEVEMENTS, NO_PROGRESS, bashKind, gain, levelOf, levelProgress, nextAchievement, title } from './progress'
-import { CARDS, DEFAULT_LAYOUT, arrange, cardId, cardInfo, move, normalize, reorder, toggle } from './cards'
-import { addAgentTokens, addCall, addStepOutput, ranking, resultTokens } from './tools'
-import { STATS_WIDTH, elapsed, enqueue, fit, isBusy, justArrived, orchestratorSaying, rowLayout, species, spinner, visibleWorkers, wire } from './team'
+import type { Alerts, CardId, CardLayout, Counter, ModelInfo, Mood, Pet, PetConfig, Progress, Sample, SaverMode, Tokens, ToolStat, Turn, Worker } from '../types'
+import { addSample, addTokens, downgrade, fiveHour, layout, modeText, NO_TOKENS, parseSaverAt, SAVER_AT, saverActive, threshold, totalTokens } from './format'
+import { moodForTool } from './pet'
+import { ACHIEVEMENTS, bashKind, gain, levelOf, NO_PROGRESS, title } from './progress'
+import { CARDS, DEFAULT_LAYOUT, cardId, cardInfo, normalize, reorder } from './cards'
+import { addAgentTokens, addCall, addStepOutput, resultTokens } from './tools'
+import { enqueue, isBusy, visibleWorkers } from './team'
+import { drawBand } from './band'
+import { drawPane, makeKit } from './panel'
 
 const PANE = 'consumo'
 const PET_NAME = 'NeuroSigma'
@@ -59,11 +30,6 @@ const cards = atom({ plugin: 'consumo', key: 'cards' } as const, DEFAULT_LAYOUT 
 const isEditing = atom({ plugin: 'consumo', key: 'isEditing' } as const, false)
 const alerts = atom({ plugin: 'consumo', key: 'alerts' } as const, { warned: 0, wasSaving: false } as Alerts)
 
-/** El modo ahorro en una frase, con el umbral que toque. */
-function modeText(m: SaverMode, at: number): string {
-  return m === 'auto' ? `auto · se activa al ${at}%` : m === 'on' ? 'encendido' : 'apagado'
-}
-
 // El progreso de la mascota se guarda al momento si hay logro o nivel y, si no, en lotes.
 let isProgressDirty = false
 
@@ -75,11 +41,6 @@ async function flushProgress($: EngineInterface) {
 
 // Último % de la ventana de 5 h leído: lo usan el modo ahorro y la mascota.
 let lastPct: number | undefined
-
-/** Verde, amarillo o rojo según lo gastado. */
-function level(pct: number): 'success' | 'warning' | 'error' {
-  return pct >= 80 ? 'error' : pct >= 50 ? 'warning' : 'success'
-}
 
 /** Vuelve a leer el modelo de la sesión: cambia con /model, los botones del panel o un fallback. */
 async function syncModel($: EngineInterface) {
@@ -504,7 +465,6 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const c = await read($, petConfig)
     if (e.props.hasSurvey || !c.isEnabled) return next(e)
-    const { Box, Text, Button } = $.ui.resolve(e)
     const [p, f, now, m, ws, pr, sa] = await Promise.all([
       read($, pet),
       read($, frame),
@@ -514,80 +474,23 @@ export const register: Register = on => {
       read($, progress),
       read($, saverAt),
     ])
-    const lv = levelOf(pr.xp)
-    const team = visibleWorkers(ws, now)
-    const running = team.filter(w => w.status === 'running').length
-    const coordinating = running > 0 && (p.mood === 'thinking' || p.mood === 'agent' || p.mood === 'idle')
-    const l = coordinating ? 'agent' : look(p, now, lastPct)
-    const said = (coordinating && orchestratorSaying(running)) || saying(l, p.detail, p.since)
-    const color = moodColor(l)
-    const energy = lastPct === undefined ? undefined : Math.max(0, Math.round(100 - lastPct))
-    const filled = energy === undefined ? 0 : Math.round(energy / 10)
-
-    if (e.props.bodyColumns < 60 || e.props.maxRows < 4) {
-      return (
-        <Box flexDirection="row" gap={1}>
-          <Text bold color={color}>
-            ({face(l, f)})
-          </Text>
-          <Text color={color} wrap="truncate">
-            {said}
-          </Text>
-          {energy !== undefined && <Text color={level(100 - energy)}>{energy}%</Text>}
-          <Button key="acariciar" label="♥" plain dimColor onPress={() => caress($)} />
-        </Box>
-      )
-    }
-
-    return (
-      <Box flexDirection="row" alignItems="center">
-        <Box borderStyle="round" borderColor={color} paddingX={1}>
-          <Text bold color={color}>
-            {face(l, f)}
-          </Text>
-        </Box>
-        <Box flexDirection="column" marginLeft={1}>
-          <Box flexDirection="row" gap={1}>
-            <Text color={color}>{prop(l, f).padEnd(3)}</Text>
-            <Text bold>{c.name}</Text>
-            <Text color="warning">{`Nv ${lv}`}</Text>
-            <Text color={color}>{said}</Text>
-          </Box>
-          <Box flexDirection="row" gap={1}>
-            <Text dimColor>energía</Text>
-            {energy === undefined ? (
-              <Text dimColor>—</Text>
-            ) : (
-              <Box flexDirection="row">
-                <Text color={level(100 - energy)}>{'■'.repeat(filled)}</Text>
-                <Text dimColor>{'□'.repeat(10 - filled)}</Text>
-              </Box>
-            )}
-            {energy !== undefined && <Text dimColor>{energy}%</Text>}
-            {saverActive(m, lastPct, sa) && <Text color="success">🌱</Text>}
-            <Button key="acariciar" label="♥" plain dimColor onPress={() => caress($)} />
-          </Box>
-          {team.length > 0 && (
-            <Box flexDirection="row" gap={1}>
-              <Text dimColor>equipo ⇄</Text>
-              {team.slice(0, 8).map(w => {
-                const wl = look({ mood: w.mood, since: w.finishedAt ?? w.startedAt }, now, undefined)
-                return (
-                  <Text key={`mini-${w.id}`} color={w.status === 'running' ? species(w.type).color : moodColor(wl)}>
-                    ({face(wl, f)})
-                  </Text>
-                )
-              })}
-              {team.length > 8 && <Text dimColor>+{team.length - 8}</Text>}
-            </Box>
-          )}
-        </Box>
-      </Box>
-    )
+    return drawBand($.ui.resolve(e), {
+      c,
+      p,
+      f,
+      now,
+      m,
+      ws,
+      pr,
+      sa,
+      lastPct,
+      isCompact: e.props.bodyColumns < 60 || e.props.maxRows < 4,
+      caress: () => void caress($),
+    })
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const ui = $.ui.resolve(e)
     const [u, now, list, weekList, m, tok, turnList, ws, tf, p, ts, pr, mi, layoutCards, editing, sAt] = await Promise.all([
       $.session.usage(),
       $.clock.now(),
@@ -609,460 +512,38 @@ export const register: Register = on => {
     const pc0 = await read($, petConfig)
     const bodyWidth = e.props.bodyColumns || e.viewport?.columns || 60
     const L = layout(e.props.bodyColumns || e.viewport?.columns || 60, e.viewport?.rows ?? 40)
-    const { inner } = L
     const five = fiveHour(u)
     const week = u.rateLimits.find(r => r.kind === 'seven_day')
     const saving = saverActive(m, five?.percentUsed, sAt)
-    const fc = five && forecast(list, five.percentUsed, five.resetsAt, now)
-    const weekFc = week && weekForecast(week.percentUsed, week.resetsAt, now)
-    const recent = recentPrompts(turnList, L.promptRows)
-    const usd = u.cost?.usd
-    const price = usd === undefined ? undefined : priceForecast(usd, u.startedAt, now, five?.resetsAt, turnList)
-    const lastPrice = [...turnList].reverse().map(turnPrice).find(p => p !== undefined)
-
-    const card = (key: string, title: string, accent: string, ...body: (JSX.Element | false | undefined)[]) => (
-      <Box key={key} flexDirection="column" borderStyle="round" borderColor={accent} paddingX={1} width={L.cardWidth}>
-        <Text bold color={accent} wrap="truncate">
-          {title}
-        </Text>
-        {body}
-      </Box>
-    )
-    // Por defecto el color dice cuánto queda; donde lleno es bueno, se pasa otro.
-    const meter = (pct: number, width: number, color: string = level(pct)) => {
-      const filled = Math.max(0, Math.min(width, Math.round((pct / 100) * width)))
-      return (
-        <Box flexDirection="row">
-          <Text color={color}>{'█'.repeat(filled)}</Text>
-          <Text dimColor>{'░'.repeat(width - filled)}</Text>
-        </Box>
-      )
-    }
-    // Las cifras se reparten en filas según el ancho que haya.
-    const stats = (items: [string, string][]) => {
-      const perRow = Math.max(1, Math.min(items.length, Math.floor(inner / 14)))
-      const width = Math.floor(inner / perRow)
-      return (
-        <Box flexDirection="row" flexWrap="wrap" width={inner}>
-          {items.map(([label, value]) => (
-            <Box key={label} flexDirection="column" width={width}>
-              <Text dimColor wrap="truncate">
-                {label}
-              </Text>
-              <Text bold wrap="truncate">
-                {value}
-              </Text>
-            </Box>
-          ))}
-        </Box>
-      )
-    }
-    const pace = (f: ReturnType<typeof forecast>, unit: (r: number) => string, quiet: string, waiting = 'Ritmo: reuniendo datos…') =>
-      !f ? (
-        <Text dimColor>{waiting}</Text>
-      ) : f.etaMs === undefined ? (
-        <Text color="success">✓ {quiet}</Text>
-      ) : (
-        <Text color={f.hitsBeforeReset ? 'error' : 'success'}>
-          {f.hitsBeforeReset ? '⚠ ' : '✓ '}
-          {unit(f.ratePerHour)} → 100% en {duration(f.etaMs)}
-          {L.isCompact
-            ? ''
-            : f.hitsBeforeReset === true
-              ? ', antes del reinicio'
-              : f.hitsBeforeReset === false
-                ? ', después del reinicio'
-                : ''}
-        </Text>
-      )
-    const head = (pct: number, resetsAt: string | undefined) => (
-      <Box flexDirection="row" justifyContent="space-between" width={inner}>
-        <Text bold color={level(pct)}>
-          {pct}% usado
-        </Text>
-        <Text dimColor>↻ {untilReset(resetsAt, now) ?? '?'}</Text>
-      </Box>
-    )
-
-    const fiveCard = card(
-      'five',
-      '⏱  Ventana de 5 h',
-      five ? level(five.percentUsed) : 'subtle',
-      five ? (
-        <Box flexDirection="column">
-          {head(five.percentUsed, five.resetsAt)}
-          {meter(five.percentUsed, inner)}
-          {!L.isShort && <Text color="claude">{sparkline(list, five.resetsAt, now, inner, FIVE_HOURS)}</Text>}
-          {!L.isShort && !L.isCompact && (
-            <Box flexDirection="row" justifyContent="space-between" width={inner}>
-              <Text dimColor>inicio</Text>
-              <Text dimColor>ahora ··· reinicio</Text>
-            </Box>
-          )}
-          {pace(fc, r => `${r}%/h`, 'Estable en la última hora')}
-        </Box>
-      ) : (
-        <Text dimColor>Sin lectura todavía: aparece tras la primera respuesta.</Text>
-      ),
-    )
-
-    const weekCard = card(
-      'week',
-      '📅  Semana',
-      week ? level(week.percentUsed) : 'subtle',
-      week ? (
-        <Box flexDirection="column">
-          {head(week.percentUsed, week.resetsAt)}
-          {meter(week.percentUsed, inner)}
-          {!L.isShort && <Text color="suggestion">{sparkline(weekList, week.resetsAt, now, inner, WEEK)}</Text>}
-          {pace(weekFc, r => `${Math.round(r * 24 * 10) / 10}%/día`, 'Sin consumo esta semana', 'Ritmo: se calcula tras el primer día de la ventana')}
-        </Box>
-      ) : (
-        <Text dimColor>Sin lectura semanal todavía.</Text>
-      ),
-    )
-
-    const priceCard = card(
-      'price',
-      '💲  Precio de la sesión',
-      'warning',
-      usd === undefined ? (
-        <Text dimColor>Este entorno no lleva la cuenta del coste.</Text>
-      ) : (
-        <Box flexDirection="column">
-          <Box flexDirection="row" justifyContent="space-between" width={inner}>
-            <Text bold color="warning">
-              {money(usd)}
-            </Text>
-            <Text dimColor>en {duration(now - u.startedAt)}</Text>
-          </Box>
-          {stats([
-            ['Por hora', price?.perHour === undefined ? '—' : money(price.perHour)],
-            ['Por prompt', price?.perPrompt === undefined ? '—' : money(price.perPrompt)],
-            ['Último', lastPrice === undefined ? '—' : money(lastPrice)],
-          ])}
-          {price?.atReset !== undefined && (
-            <Text color="warning">
-              ≈ {money(price.atReset)} al reiniciarse la ventana{L.isCompact ? '' : ', a este ritmo'}
-            </Text>
-          )}
-          <Text dimColor>
-            {L.isCompact ? 'Equivalente a precios de API' : 'Equivalente a precios de API: con tu suscripción no lo pagas aparte.'}
-          </Text>
-        </Box>
-      ),
-    )
-
-    const tokenCard = card(
-      'tokens',
-      '🔢  Tokens',
-      'suggestion',
-      stats([
-        ['Entrada', compact(tok.input)],
-        ['Salida', compact(tok.output)],
-        ['Caché leída', compact(tok.cacheRead)],
-        ['Caché escrita', compact(tok.cacheWrite)],
-      ]),
-      <Box flexDirection="row" gap={1}>
-        <Text dimColor>Caché</Text>
-        {meter(cacheHit(tok), Math.max(6, Math.min(20, inner - 12)), cacheHit(tok) >= 70 ? 'success' : 'warning')}
-        <Text color={cacheHit(tok) >= 70 ? 'success' : 'warning'}>{cacheHit(tok)}%</Text>
-      </Box>,
-      <Text dimColor wrap="truncate">
-        {tok.requests} peticiones{u.context.percent !== undefined ? ` · contexto ${u.context.percent}%` : ''}
-      </Text>,
-    )
-
-    const prow = promptRow(inner, L.isCompact)
-    const turnsCard = card(
-      'turns',
-      '💬  Últimos prompts',
-      'claude',
-      recent.length === 0 && <Text dimColor>Aún no hay prompts en esta sesión.</Text>,
-      ...recent.map(t => {
-        const delta = (t.endPct ?? 0) - (t.startPct ?? 0)
-        const p = turnPrice(t)
-        return (
-          // Cada columna con su ancho fijo y el texto recortado a lo que queda: nunca salta de línea.
-          <Box key={t.turnId} flexDirection="row" width={inner} overflow="hidden">
-            <Text bold color={!t.isDone ? 'claude' : delta >= 5 ? 'error' : delta >= 2 ? 'warning' : 'success'}>
-              {turnCost(t).padStart(6)}{' '}
-            </Text>
-            {prow.showPrice && <Text color="warning">{(p === undefined ? '' : money(p)).padStart(7)} </Text>}
-            {prow.showTokens && <Text dimColor>{compact(t.tokens).padStart(5)} </Text>}
-            <Text wrap="truncate">{promptLine(t.text, prow.textWidth)}</Text>
-          </Box>
-        )
-      }),
-    )
-
-    // El modelo: el de la sesión y, si el ahorro lo cambia, el que responde de verdad.
-    const sessionModel = mi.session
-    const effective = saving ? (downgrade(sessionModel ?? '', undefined)?.model ?? sessionModel) : sessionModel
-    const isRedirected = modelFamily(effective) !== modelFamily(sessionModel)
-    const saverCard = card(
-      'saver',
-      '🧠  Modelo y ahorro',
-      saving ? 'success' : 'subtle',
-      <Box flexDirection="row" gap={1} width={inner} overflow="hidden">
-        <Text dimColor>Modelo</Text>
-        <Text bold color={isRedirected ? 'success' : 'claude'} wrap="truncate">
-          {modelName(effective)}
-        </Text>
-        {isRedirected && <Text color="success">🌱</Text>}
-      </Box>,
-      <Text color={saving ? 'success' : undefined} dimColor={!saving}>
-        {saving ? `Activo: Opus → ${SAVER_MODEL}${L.isCompact ? '' : ', esfuerzo medio'}` : `Inactivo (${modeText(m, sAt)})`}
-      </Text>,
-      <Box flexDirection="row" flexWrap="wrap" gap={1}>
-        <Button key="modo-auto" hotkey="a" label="Auto" variant={m === 'auto' ? 'primary' : undefined} onPress={() => setMode($, 'auto')} />
-        <Button key="modo-on" hotkey="e" label="Encendido" variant={m === 'on' ? 'primary' : undefined} onPress={() => setMode($, 'on')} />
-        <Button key="modo-off" hotkey="o" label="Apagado" variant={m === 'off' ? 'primary' : undefined} onPress={() => setMode($, 'off')} />
-      </Box>,
-    )
-
-    // Qué herramientas se llevan los tokens: la salida que las pidió más lo que devolvieron.
-    const ranked = ranking(ts).slice(0, L.promptRows)
-    const nameWidth = Math.min(14, Math.max(6, ...ranked.map(x => x.stat.name.length)))
-    const toolBar = Math.max(4, Math.min(16, inner - nameWidth - (L.isCompact ? 12 : 26)))
-    const toolsCard = card(
-      'tools',
-      '🧰  Tokens por herramienta',
-      'remember',
-      ranked.length === 0 && <Text dimColor>Aún no se ha usado ninguna herramienta.</Text>,
-      ...ranked.map(({ stat, tokens: n, share }) => {
-        const filled = Math.round((share / 100) * toolBar)
-        return (
-          <Box key={`tool-${stat.name}`} flexDirection="row" width={inner} overflow="hidden">
-            <Text bold wrap="truncate">
-              {fitName(stat.name, nameWidth).padEnd(nameWidth)}{' '}
-            </Text>
-            <Text color="remember">{'█'.repeat(filled)}</Text>
-            <Text dimColor>{'░'.repeat(toolBar - filled)}</Text>
-            <Text>{`${share}%`.padStart(5)}</Text>
-            <Text dimColor>{compact(n).padStart(6)}</Text>
-            {!L.isCompact && <Text dimColor>{` ×${stat.calls}`.padEnd(6)}</Text>}
-            {!L.isCompact && stat.errors > 0 && <Text color="error">{` ✗${stat.errors}`}</Text>}
-          </Box>
-        )
-      }),
-      ranked.length > 0 && !L.isCompact && <Text dimColor>Tokens = salida que las pidió + lo que devolvieron (≈).</Text>,
-    )
-
-    // La mascota: nivel, experiencia y logros.
-    const lv = levelOf(pr.xp)
-    const nextA = nextAchievement(pr)
-    const petCard = card(
-      'pet',
-      `🏆  ${pc0.name}`,
-      'warning',
-      <Box flexDirection="row" justifyContent="space-between" width={inner}>
-        <Text bold color="warning">
-          {`Nivel ${lv} · ${title(lv)}`}
-        </Text>
-        <Text dimColor>{pr.xp} XP</Text>
-      </Box>,
-      <Box flexDirection="row" gap={1}>
-        {meter(levelProgress(pr.xp), Math.max(6, inner - 6), 'warning')}
-        <Text dimColor>{`${levelProgress(pr.xp)}%`.padStart(4)}</Text>
-      </Box>,
-      <Text wrap="truncate">
-        {pr.unlocked.length}/{ACHIEVEMENTS.length} logros{' '}
-        {ACHIEVEMENTS.filter(a => pr.unlocked.includes(a.id)).map(a => a.emoji).join(' ')}
-      </Text>,
-      nextA && (
-        <Text dimColor wrap="truncate">
-          Próximo: {nextA.a.name} — {nextA.a.hint} ({Math.min(nextA.count, nextA.a.goal)}/{nextA.a.goal})
-        </Text>
-      ),
-    )
-
-    // El equipo: el orquestador arriba y un cable animado hasta cada subagente.
-    const team = visibleWorkers(ws, now)
-    const running = team.filter(w => w.status === 'running').length
-    const depth = (w: Worker): number => {
-      let d = 0
-      for (let parent = w.parentId; parent && d < 4; parent = team.find(x => x.id === parent)?.parentId) d++
-      return d
-    }
-    const teamWidth = Math.min(bodyWidth, Math.max(L.cardWidth, 100))
-    // Ancho útil de una fila: la tarjeta menos borde y margen.
-    const rowWidth = Math.max(20, teamWidth - 4)
-    const pc = pc0
-    const caught = team.find(w => justArrived(w.packets, 'result', now))
-    const reported = team.find(w => justArrived(w.packets, 'progress', now))
-    const boss = caught ? 'happy' : running > 0 ? 'agent' : look(p, now, lastPct)
-    const slow = Math.floor(tf / 5)
-    const bossSays = caught
-      ? `¡Resultado recibido de ${species(caught.type).label}!`
-      : reported
-        ? `${species(reported.type).label} informa…`
-        : (orchestratorSaying(running) ?? 'Recibiendo resultados')
-    const teamCard = team.length > 0 && (
-      <Box key="team" flexDirection="column" borderStyle="round" borderColor="remember" paddingX={1} width={teamWidth}>
-        <Text bold color="remember" wrap="truncate">
-          🤖  Equipo · {running} trabajando{team.length > running ? ` · ${team.length - running} terminado${team.length - running > 1 ? 's' : ''}` : ''}
-        </Text>
-        <Box flexDirection="row" alignItems="center">
-          <Box borderStyle="round" borderColor={moodColor(boss)} paddingX={1}>
-            <Text bold color={moodColor(boss)}>
-              {face(boss, slow)}
-            </Text>
-          </Box>
-          <Box flexDirection="column" marginLeft={1}>
-            <Text bold>{pc.name}</Text>
-            <Text color={moodColor(boss)} wrap="truncate">
-              {bossSays}
-            </Text>
-          </Box>
-        </Box>
-        {team.map((w, i) => {
-          const sp = species(w.type)
-          const d = depth(w)
-          const rl = rowLayout(rowWidth, d)
-          const gotTask = w.status === 'running' && justArrived(w.packets, 'task', now)
-          const wl = gotTask ? 'happy' : look({ mood: w.mood, since: w.finishedAt ?? w.startedAt }, now, undefined)
-          const wr = wire(w, now, tf + i * 5, rl.wireWidth)
-          const isLast = i === team.length - 1
-          const isFaded = w.status !== 'running' && !isBusy(w.packets, now) && now - (w.finishedAt ?? now) > 10_000
-          const packetColor = wr.kind === 'task' ? 'suggestion' : wr.kind === 'result' ? 'success' : sp.color
-          const said = gotTask ? '¡Tarea recibida!' : saying(wl, w.detail, w.startedAt)
-          // Todo medido: el nombre, y la descripción y la frase en lo que quede.
-          const label = fit(sp.label, rl.textWidth)
-          const rest = fit(`${rl.showDescription ? `${w.description} · ` : ''}${said}`, rl.textWidth - label.length - 1)
-          const stats = ` ${compact(w.tokens)} · ${elapsed((w.finishedAt ?? now) - w.startedAt)}`.padStart(STATS_WIDTH)
-          return (
-            <Box key={`w-${w.id}`} flexDirection="row" width={rowWidth} overflow="hidden">
-              <Text dimColor>
-                {'  '.repeat(Math.min(d, 4))}
-                {isLast ? '  └' : '  ├'}
-              </Text>
-              {wr.segments.map((seg, k) => (
-                <Text
-                  key={`seg-${w.id}-${k}`}
-                  bold={seg.style === 'glyph'}
-                  dimColor={seg.style === 'line' || isFaded}
-                  color={
-                    seg.style === 'glyph' || seg.style === 'trail'
-                      ? packetColor
-                      : seg.style === 'flow'
-                        ? sp.color
-                        : seg.style === 'end' && wr.kind === 'none'
-                          ? w.status === 'failed'
-                            ? 'error'
-                            : 'success'
-                          : undefined
-                  }
-                >
-                  {seg.text}
-                </Text>
-              ))}
-              <Text bold dimColor={isFaded} color={w.status === 'running' ? sp.color : moodColor(wl)}>
-                {' '}({face(wl, Math.floor(tf / 5) + i)}){' '}
-              </Text>
-              <Text color={sp.color} dimColor={isFaded}>
-                {w.status === 'running' ? spinner(tf + i * 3) : w.status === 'failed' ? '✗' : '✓'} {sp.badge}{' '}
-              </Text>
-              <Text bold color={sp.color} dimColor={isFaded}>
-                {label}
-              </Text>
-              <Text dimColor={isFaded}>{rest ? ` ${rest}` : ''}</Text>
-              <Box flexGrow={1} />
-              {rl.showStats && <Text dimColor>{stats}</Text>}
-            </Box>
-          )
-        })}
-      </Box>
-    )
-
-    // Columnas según el ancho y el orden que haya elegido cada persona.
-    const byId: Record<CardId, JSX.Element> = {
-      five: fiveCard,
-      price: priceCard,
-      week: weekCard,
-      tokens: tokenCard,
-      tools: toolsCard,
-      turns: turnsCard,
-      saver: saverCard,
-      pet: petCard,
-    }
-    const columns = arrange(layoutCards, L.columns).map(ids => ids.map(id => byId[id]))
-    const isEmpty = columns.every(c => c.length === 0)
-
-    // El editor: cada tarjeta con sus botones para moverla y ocultarla.
-    const editorWidth = Math.min(bodyWidth, Math.max(L.cardWidth, 56))
-    const rowNameWidth = Math.max(...CARDS.map(c => c.name.length)) + 1
-    const editor = editing && (
-      <Box key="editor" flexDirection="column" borderStyle="round" borderColor="suggestion" paddingX={1} width={editorWidth}>
-        <Text bold color="suggestion">
-          ⚙  Personalizar tarjetas
-        </Text>
-        <Text dimColor wrap="truncate">
-          Se colocan de izquierda a derecha y de arriba abajo.
-        </Text>
-        {layoutCards.order.map((id, i) => {
-          const info = cardInfo(id)
-          const isHidden = layoutCards.hidden.includes(id)
-          return (
-            <Box key={`fila-${id}`} flexDirection="row" gap={1}>
-              <Text dimColor>{String(i + 1).padStart(2)}</Text>
-              {/* Columnas de ancho fijo: los emojis no miden lo mismo y los botones quedarían torcidos. */}
-              <Box width={3}>
-                <Text dimColor={isHidden}>{info.emoji}</Text>
-              </Box>
-              <Box width={rowNameWidth}>
-                <Text bold={!isHidden} dimColor={isHidden} wrap="truncate">
-                  {info.name}
-                </Text>
-              </Box>
-              {i > 0 ? (
-                <Button key={`subir-${id}`} label="↑" onPress={() => setCards($, c => move(c, id, -1))} />
-              ) : (
-                <Text>{'     '}</Text>
-              )}
-              {i < layoutCards.order.length - 1 ? (
-                <Button key={`bajar-${id}`} label="↓" onPress={() => setCards($, c => move(c, id, 1))} />
-              ) : (
-                <Text>{'     '}</Text>
-              )}
-              <Button
-                key={`ver-${id}`}
-                label={isHidden ? 'Mostrar' : 'Ocultar'}
-                variant={isHidden ? 'primary' : undefined}
-                onPress={() => setCards($, c => toggle(c, id))}
-              />
-            </Box>
-          )
-        })}
-        <Box flexDirection="row" gap={1} marginTop={1}>
-          <Button key="tarjetas-listo" hotkey="l" label="Listo" variant="primary" onPress={() => update($, isEditing, () => false)} />
-          <Button key="tarjetas-restablecer" hotkey="r" label="Restablecer" onPress={() => setCards($, () => DEFAULT_LAYOUT)} />
-        </Box>
-      </Box>
-    )
-
-    return (
-      <Box flexDirection="column">
-        {teamCard}
-        {editor}
-        {isEmpty && <Text dimColor>Todas las tarjetas están ocultas: pulsa «⚙ Personalizar» o usa /tarjetas mostrar.</Text>}
-        <Box flexDirection="row" gap={1}>
-          {columns.map((cs, i) => (
-            <Box key={`col-${i}`} flexDirection="column">
-              {cs}
-            </Box>
-          ))}
-        </Box>
-        {!editing && (
-          <Box flexDirection="row">
-            <Button key="personalizar" label="⚙ Personalizar" plain dimColor onPress={() => update($, isEditing, () => true)} />
-          </Box>
-        )}
-      </Box>
-    )
+    return drawPane({
+      ui,
+      kit: makeKit(ui, L, now),
+      L,
+      now,
+      bodyWidth,
+      u,
+      five,
+      week,
+      list,
+      weekList,
+      m,
+      sAt,
+      saving,
+      tok,
+      turnList,
+      ws,
+      tf,
+      p,
+      ts,
+      pr,
+      mi,
+      layoutCards,
+      editing,
+      pc0,
+      lastPct,
+      setMode: next => setMode($, next),
+      setCards: change => setCards($, change),
+      setEditing: value => update($, isEditing, () => value),
+    })
   })
-}
-
-function fitName(name: string, width: number): string {
-  return name.length > width ? `${name.slice(0, width - 1)}…` : name
 }

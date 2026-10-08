@@ -114,10 +114,13 @@ con él `tsc -p .` comprueba los tipos.
 
 | Archivo | Qué hace |
 | --- | --- |
-| `hooks/register.tsx` | Eventos, comandos, panel y banda de la mascota |
+| `hooks/register.tsx` | Eventos, comandos y estado del mod (los átomos se declaran aquí, donde se leen) |
+| `hooks/band.tsx` | Banda de la mascota encima del prompt |
+| `hooks/panel/` | Panel `/consumo`: `index.tsx` lo coloca en columnas, `kit.tsx` tiene las piezas comunes y cada tarjeta va en su archivo |
 | `hooks/format.ts` | Cálculos de uso, predicción, precio, tokens y disposición |
 | `hooks/pet.ts` | Estados, caras y frases de la mascota |
 | `hooks/team.ts` | Equipo de subagentes: especies, cables y paquetes |
+| `hooks/cards.ts`, `progress.ts`, `tools.ts` | Orden de tarjetas, niveles y logros, y tokens por herramienta |
 | `types/index.d.ts` | Contrato de los valores que el mod guarda |
 
 ## Licencia
