@@ -144,8 +144,16 @@ export function sparkline(
   return out
 }
 
-export function saverActive(mode: SaverMode, pct: number | undefined): boolean {
-  return mode === 'on' || (mode === 'auto' && pct !== undefined && pct >= SAVER_AT)
+export function saverActive(mode: SaverMode, pct: number | undefined, at: number = SAVER_AT): boolean {
+  return mode === 'on' || (mode === 'auto' && pct !== undefined && pct >= at)
+}
+
+/** El umbral del modo ahorro que escribió la persona (entre 50 y 99), o undefined si no vale. */
+export function parseSaverAt(text: string): number | undefined {
+  const clean = text.trim().replace(/%$/, '')
+  if (!/^\d{2}$/.test(clean)) return undefined
+  const n = Number(clean)
+  return n >= 50 && n <= 99 ? n : undefined
 }
 
 type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | number

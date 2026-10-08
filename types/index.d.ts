@@ -101,6 +101,8 @@ declare module 'claude-code' {
       samples: Sample[]
       weekSamples: Sample[]
       mode: SaverMode
+      /** Porcentaje de la ventana de 5 h a partir del cual el modo auto ahorra (50-99). */
+      saverAt: number
       tokens: Tokens
       turns: Turn[]
       pet: Pet

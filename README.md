@@ -66,12 +66,13 @@ También escribiendo:
 
 ### Modo ahorro `/ahorro`
 
-Al llegar al **85 %** de la ventana de 5 h, cambia las peticiones de Opus/Fable a
+Al llegar al **85 %** de la ventana de 5 h (el umbral se puede cambiar, ver abajo), cambia las peticiones de Opus/Fable a
 **Sonnet 5.5** y baja el esfuerzo alto a medio, para que la ventana te dure.
 
 - `/ahorro auto` — se activa solo al llegar al umbral (por defecto)
 - `/ahorro on` — encendido: activo siempre, gastes lo que gastes
 - `/ahorro off` — nunca
+- `/ahorro umbral 90` — cambia el porcentaje al que se activa el modo auto (de 50 a 99; por defecto 85)
 
 ### Mascota `/mascota`
 

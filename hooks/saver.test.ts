@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { addSample, downgrade, forecast, saverActive, sparkline, SAVER_MODEL, WEEK } from './format'
+import { addSample, downgrade, forecast, parseSaverAt, saverActive, sparkline, SAVER_MODEL, WEEK } from './format'
 
 const now = Date.parse('2026-10-06T10:00:00Z')
 const reset = '2026-10-06T12:00:00Z' // la ventana empezó a las 07:00
@@ -69,4 +69,18 @@ test('la ventana semanal usa su propio periodo', () => {
   expect(fc.hitsBeforeReset).toBe(false)
   const line = sparkline(s, wreset, now, 7, WEEK)
   expect(line.slice(-2)).toBe('··')
+})
+
+test('modo ahorro: el umbral se puede cambiar', () => {
+  expect(saverActive('auto', 89, 90)).toBe(false)
+  expect(saverActive('auto', 90, 90)).toBe(true)
+  expect(saverActive('on', 0, 99)).toBe(true)
+  expect(saverActive('off', 100, 50)).toBe(false)
+  expect(saverActive('auto', undefined, 50)).toBe(false)
+})
+
+test('umbral del modo ahorro: solo valen números de 50 a 99', () => {
+  expect(parseSaverAt('90')).toBe(90)
+  expect(parseSaverAt(' 75% ')).toBe(75)
+  for (const bad of ['', 'abc', '49', '100', '85.5', '-60', '9']) expect(parseSaverAt(bad)).toBeUndefined()
 })
