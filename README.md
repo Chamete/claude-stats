@@ -21,7 +21,7 @@ Responde `y` para añadir el marketplace y elige el alcance **user**. Queda
 activo al momento y en todas las sesiones siguientes.
 
 Para actualizar a la última versión: `claude plugin update consumo` y después
-`/reload-plugins`.
+`/reload-plugins`. Qué trae cada versión: [CHANGELOG.md](CHANGELOG.md).
 
 > Necesita una versión de Claude Code con soporte de mods (2.1.291 o posterior).
 > Las ventanas de 5 h y semanal solo aparecen si inicias sesión con una
