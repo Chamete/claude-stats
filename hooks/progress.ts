@@ -80,7 +80,8 @@ export function nextAchievement(p: Progress): { a: Achievement; count: number } 
 
 /** Qué cuenta un comando de Bash: commits y tests. */
 export function bashKind(command: string): 'commits' | 'tests' | undefined {
-  if (/\bgit\s+(?:-\S+\s+)*commit\b/.test(command)) return 'commits'
+  // Un commit de prueba (--dry-run) no deja nada en el historial: no cuenta.
+  if (/\bgit\s+(?:-c\s+\S+\s+|-\S+\s+)*commit\b/.test(command) && !/--dry-run\b/.test(command)) return 'commits'
   if (/\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|\b(?:jest|vitest|pytest|mocha)\b|\b(?:go|cargo|deno|claude\s+plugin)\s+test\b/.test(command))
     return 'tests'
   return undefined

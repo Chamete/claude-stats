@@ -144,8 +144,16 @@ export function sparkline(
   return out
 }
 
-export function saverActive(mode: SaverMode, pct: number | undefined): boolean {
-  return mode === 'on' || (mode === 'auto' && pct !== undefined && pct >= SAVER_AT)
+export function saverActive(mode: SaverMode, pct: number | undefined, at: number = SAVER_AT): boolean {
+  return mode === 'on' || (mode === 'auto' && pct !== undefined && pct >= at)
+}
+
+/** El umbral del modo ahorro que escribió la persona (entre 50 y 99), o undefined si no vale. */
+export function parseSaverAt(text: string): number | undefined {
+  const clean = text.trim().replace(/%$/, '')
+  if (!/^\d{2}$/.test(clean)) return undefined
+  const n = Number(clean)
+  return n >= 50 && n <= 99 ? n : undefined
 }
 
 type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | number
@@ -223,6 +231,14 @@ export function turnCost(t: Turn): string {
   const d = Math.round((t.endPct - t.startPct) * 10) / 10
   // Si la ventana se reinició a mitad de turno, la resta no tiene sentido.
   return d < 0 ? '↻' : `+${d}%`
+}
+
+/** Cuántos prompts recientes enseña como mucho la tarjeta de últimos prompts. */
+export const MAX_PROMPTS = 5
+
+/** Los últimos prompts, del más reciente al más antiguo, sin pasar de `MAX_PROMPTS` ni de lo que quepa. */
+export function recentPrompts(turns: Turn[], fits: number): Turn[] {
+  return turns.slice(-Math.min(MAX_PROMPTS, fits)).reverse()
 }
 
 /** Columnas de una fila de prompt: % (6), precio (7) y tokens (5), cada uno con su espacio. */

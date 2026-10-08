@@ -156,3 +156,24 @@ test('personalizar: el editor mueve y oculta tarjetas, y /tarjetas también', as
   expect((await $.command.run({ command: 'tarjetas', args: 'ocultar nada' } as never)).text).toContain('No conozco')
 })
 
+
+test('la tarjeta del modo ahorro enseña el umbral que se ha elegido', async ($, on) => {
+  engine(on)
+  const pane = await $.ui.mount({
+    plugin: 'consumo',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'consumo',
+    props: { title: 'Consumo', isFocused: true, bodyColumns: 120 } as never,
+    viewport: { columns: 120, rows: 40 },
+  })
+  expect(JSON.stringify(await pane.drawn())).toContain('se activa al 85%')
+  // Con el panel ya abierto, el comando cambia el umbral y la tarjeta lo refleja.
+  const r = await $.command.run({ command: 'ahorro', args: 'umbral 90' } as never)
+  expect(r.text).toContain('90%')
+  const drawn = JSON.stringify(await pane.drawn())
+  expect(drawn).toContain('se activa al 90%')
+  expect(drawn).not.toContain('se activa al 85%')
+  expect((await $.command.run({ command: 'ahorro', args: 'umbral 120' } as never)).text).toContain('entre 50 y 99')
+  await pane.unmount()
+})

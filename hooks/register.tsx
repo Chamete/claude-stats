@@ -19,9 +19,11 @@ import {
   modelFamily,
   modelName,
   money,
+  parseSaverAt,
   priceForecast,
   promptLine,
   promptRow,
+  recentPrompts,
   saverActive,
   sparkline,
   threshold,
@@ -42,6 +44,7 @@ const PET_NAME = 'NeuroSigma'
 const samples = atom({ plugin: 'consumo', key: 'samples' } as const, [] as Sample[])
 const weekSamples = atom({ plugin: 'consumo', key: 'weekSamples' } as const, [] as Sample[])
 const mode = atom({ plugin: 'consumo', key: 'mode' } as const, 'auto' as SaverMode)
+const saverAt = atom({ plugin: 'consumo', key: 'saverAt' } as const, SAVER_AT)
 const tokens = atom({ plugin: 'consumo', key: 'tokens' } as const, NO_TOKENS as Tokens)
 const turns = atom({ plugin: 'consumo', key: 'turns' } as const, [] as Turn[])
 const pet = atom({ plugin: 'consumo', key: 'pet' } as const, { mood: 'idle', since: 0 } as Pet)
@@ -56,10 +59,18 @@ const cards = atom({ plugin: 'consumo', key: 'cards' } as const, DEFAULT_LAYOUT 
 const isEditing = atom({ plugin: 'consumo', key: 'isEditing' } as const, false)
 const alerts = atom({ plugin: 'consumo', key: 'alerts' } as const, { warned: 0, wasSaving: false } as Alerts)
 
-const MODES: Record<SaverMode, string> = {
-  auto: `auto · se activa al ${SAVER_AT}%`,
-  on: 'encendido',
-  off: 'apagado',
+/** El modo ahorro en una frase, con el umbral que toque. */
+function modeText(m: SaverMode, at: number): string {
+  return m === 'auto' ? `auto · se activa al ${at}%` : m === 'on' ? 'encendido' : 'apagado'
+}
+
+// El progreso de la mascota se guarda al momento si hay logro o nivel y, si no, en lotes.
+let isProgressDirty = false
+
+async function flushProgress($: EngineInterface) {
+  if (!isProgressDirty) return
+  isProgressDirty = false
+  await $.store.set('progress', await read($, progress))
 }
 
 // Último % de la ventana de 5 h leído: lo usan el modo ahorro y la mascota.
@@ -78,11 +89,11 @@ async function syncModel($: EngineInterface) {
 
 async function refresh($: EngineInterface) {
   await syncModel($).catch(() => {})
-  const [u, now, m, a] = await Promise.all([$.session.usage(), $.clock.now(), read($, mode), read($, alerts)])
+  const [u, now, m, a, at] = await Promise.all([$.session.usage(), $.clock.now(), read($, mode), read($, alerts), read($, saverAt)])
   const five = fiveHour(u)
   const week = u.rateLimits.find(r => r.kind === 'seven_day')
   lastPct = five?.percentUsed
-  const saving = saverActive(m, lastPct)
+  const saving = saverActive(m, lastPct, at)
 
   const t = threshold(u)
   if (t > a.warned) $.ui.toast(`⚠️ Llevas ${t}% de tu ventana de 5 h`)
@@ -111,6 +122,7 @@ async function refresh($: EngineInterface) {
       await $.store.set('weekSamples', list)
     }
   }
+  await flushProgress($)
 }
 
 /** Si añadir la lectura cambió el historial (si no, no hace falta guardarlo). */
@@ -137,7 +149,10 @@ async function earn($: EngineInterface, counter: Counter) {
     return g.progress
   })
   if (!g) return
-  await $.store.set('progress', g.progress)
+  if (g.levelUp || g.unlocked.length) {
+    await $.store.set('progress', g.progress)
+    isProgressDirty = false
+  } else isProgressDirty = true
   const name = (await read($, petConfig)).name
   for (const a of g.unlocked) $.ui.toast(`🏆 Logro: ${a.emoji} ${a.name} — ${a.hint}`)
   if (g.levelUp) $.ui.toast(`⭐ ${name} sube al nivel ${g.levelUp}: ${title(g.levelUp)}`)
@@ -210,6 +225,11 @@ async function syncAgents($: EngineInterface) {
   if (JSON.stringify(next) !== JSON.stringify(before)) await update($, workers, () => next)
 }
 
+async function tickPet($: EngineInterface) {
+  if (!(await read($, petConfig)).isEnabled) return
+  await update($, frame, f => f + 1)
+}
+
 async function tickTeam($: EngineInterface) {
   const [ws, now] = await Promise.all([read($, workers), $.clock.now()])
   if (visibleWorkers(ws, now).length > 0 || ws.some(w => isBusy(w.packets, now))) {
@@ -229,10 +249,11 @@ export const register: Register = on => {
     // Quita la línea de estado que dejaban las versiones anteriores.
     $.ui.status(undefined)
     // El historial, el modo y la mascota sobreviven entre sesiones.
-    const [stored, storedWeek, storedMode, storedPet, storedProgress, storedCards, now] = await Promise.all([
+    const [stored, storedWeek, storedMode, storedSaverAt, storedPet, storedProgress, storedCards, now] = await Promise.all([
       $.store.get('samples'),
       $.store.get('weekSamples'),
       $.store.get('mode'),
+      $.store.get('saverAt'),
       $.store.get('petConfig'),
       $.store.get('progress'),
       $.store.get('cards'),
@@ -241,6 +262,8 @@ export const register: Register = on => {
     if (Array.isArray(stored)) await update($, samples, list => (list.length ? list : (stored as Sample[])))
     if (Array.isArray(storedWeek)) await update($, weekSamples, list => (list.length ? list : (storedWeek as Sample[])))
     if (storedMode === 'auto' || storedMode === 'on' || storedMode === 'off') await update($, mode, () => storedMode)
+    const validAt = typeof storedSaverAt === 'number' ? parseSaverAt(String(storedSaverAt)) : undefined
+    if (validAt !== undefined) await update($, saverAt, () => validAt)
     if (storedPet && typeof storedPet === 'object') await update($, petConfig, c => ({ ...c, ...(storedPet as PetConfig) }))
     if (storedProgress && typeof storedProgress === 'object')
       await update($, progress, p => (p.xp > 0 ? p : { ...NO_PROGRESS, ...(storedProgress as Progress) }))
@@ -252,8 +275,8 @@ export const register: Register = on => {
     await $.command.register({ name: 'consumo', description: 'Abre el panel de consumo con historial y predicción' })
     await $.command.register({
       name: 'ahorro',
-      description: 'Modo ahorro: auto, on u off (sin argumento muestra el estado)',
-      argumentHint: '[auto|on|off]',
+      description: 'Modo ahorro: auto, on, off o umbral <50-99> (sin argumento muestra el estado)',
+      argumentHint: '[auto|on|off|umbral <50-99>]',
     })
     await $.command.register({
       name: 'tarjetas',
@@ -268,7 +291,8 @@ export const register: Register = on => {
     await refresh($)
     $.clock.every(60_000, () => void refresh($).catch(() => {}))
     // Fotogramas de la mascota.
-    $.clock.every(800, () => void update($, frame, f => f + 1).catch(() => {}))
+    // Con la mascota oculta no hay nada que animar: no se redibuja.
+    $.clock.every(800, () => void tickPet($).catch(() => {}))
     // Equipo de subagentes: animación más fluida y repaso con la lista del motor.
     $.clock.every(150, () => void tickTeam($).catch(() => {}))
     $.clock.every(2_000, () => void syncAgents($).catch(() => {}))
@@ -287,13 +311,23 @@ export const register: Register = on => {
 
   on('command.run', { command: 'ahorro' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
+    const [cmd = '', value = ''] = arg.split(/\s+/)
+    if (cmd === 'umbral') {
+      const at = parseSaverAt(value)
+      if (at === undefined) return { text: 'Indica un porcentaje entre 50 y 99, por ejemplo: /ahorro umbral 90.' }
+      await update($, saverAt, () => at)
+      await $.store.set('saverAt', at)
+      await refresh($)
+      return { text: `Modo ahorro: el modo auto se activará al ${at}% de la ventana de 5 h.` }
+    }
+    const at = await read($, saverAt)
     if (arg === 'auto' || arg === 'on' || arg === 'off') {
       await setMode($, arg)
-      return { text: `Modo ahorro: ${MODES[arg]}.` }
+      return { text: `Modo ahorro: ${modeText(arg, at)}.` }
     }
     const m = await read($, mode)
-    const state = saverActive(m, lastPct) ? 'activo ahora' : 'inactivo ahora'
-    return { text: `Modo ahorro: ${MODES[m]} — ${state}. Usa /ahorro auto|on|off.` }
+    const state = saverActive(m, lastPct, at) ? 'activo ahora' : 'inactivo ahora'
+    return { text: `Modo ahorro: ${modeText(m, at)} — ${state}. Usa /ahorro auto|on|off|umbral <50-99>.` }
   })
 
   on('command.run', { command: 'tarjetas' }, async ($, e) => {
@@ -440,14 +474,15 @@ export const register: Register = on => {
         all.map(t => (t.turnId === e.turnId ? { ...t, endPct, endCost, isDone: true } : t)),
       )
       await setPet($, e.reason === 'answer' ? 'happy' : e.reason === 'aborted' ? 'surprised' : 'error')
+      await flushProgress($)
     }
     return r
   })
 
   // Cada petición al modelo: modo ahorro a la ida, tokens a la vuelta.
   on('turn.step', async function* ($, e, next) {
-    const m = await read($, mode)
-    const change = saverActive(m, lastPct) ? downgrade(e.model, e.effort) : undefined
+    const [m, at] = await Promise.all([read($, mode), read($, saverAt)])
+    const change = saverActive(m, lastPct, at) ? downgrade(e.model, e.effort) : undefined
     const r = yield* next(change ? { ...e, ...change } : e)
     const usage = r.usage
     if (usage) {
@@ -470,13 +505,14 @@ export const register: Register = on => {
     const c = await read($, petConfig)
     if (e.props.hasSurvey || !c.isEnabled) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
-    const [p, f, now, m, ws, pr] = await Promise.all([
+    const [p, f, now, m, ws, pr, sa] = await Promise.all([
       read($, pet),
       read($, frame),
       $.clock.now(),
       read($, mode),
       read($, workers),
       read($, progress),
+      read($, saverAt),
     ])
     const lv = levelOf(pr.xp)
     const team = visibleWorkers(ws, now)
@@ -528,7 +564,7 @@ export const register: Register = on => {
               </Box>
             )}
             {energy !== undefined && <Text dimColor>{energy}%</Text>}
-            {saverActive(m, lastPct) && <Text color="success">🌱</Text>}
+            {saverActive(m, lastPct, sa) && <Text color="success">🌱</Text>}
             <Button key="acariciar" label="♥" plain dimColor onPress={() => caress($)} />
           </Box>
           {team.length > 0 && (
@@ -552,7 +588,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    const [u, now, list, weekList, m, tok, turnList, ws, tf, p, ts, pr, mi, layoutCards, editing] = await Promise.all([
+    const [u, now, list, weekList, m, tok, turnList, ws, tf, p, ts, pr, mi, layoutCards, editing, sAt] = await Promise.all([
       $.session.usage(),
       $.clock.now(),
       read($, samples),
@@ -568,6 +604,7 @@ export const register: Register = on => {
       read($, model),
       read($, cards),
       read($, isEditing),
+      read($, saverAt),
     ])
     const pc0 = await read($, petConfig)
     const bodyWidth = e.props.bodyColumns || e.viewport?.columns || 60
@@ -575,10 +612,10 @@ export const register: Register = on => {
     const { inner } = L
     const five = fiveHour(u)
     const week = u.rateLimits.find(r => r.kind === 'seven_day')
-    const saving = saverActive(m, five?.percentUsed)
+    const saving = saverActive(m, five?.percentUsed, sAt)
     const fc = five && forecast(list, five.percentUsed, five.resetsAt, now)
     const weekFc = week && weekForecast(week.percentUsed, week.resetsAt, now)
-    const recent = turnList.slice(-L.promptRows).reverse()
+    const recent = recentPrompts(turnList, L.promptRows)
     const usd = u.cost?.usd
     const price = usd === undefined ? undefined : priceForecast(usd, u.startedAt, now, five?.resetsAt, turnList)
     const lastPrice = [...turnList].reverse().map(turnPrice).find(p => p !== undefined)
@@ -775,7 +812,7 @@ export const register: Register = on => {
         {isRedirected && <Text color="success">🌱</Text>}
       </Box>,
       <Text color={saving ? 'success' : undefined} dimColor={!saving}>
-        {saving ? `Activo: Opus → ${SAVER_MODEL}${L.isCompact ? '' : ', esfuerzo medio'}` : `Inactivo (${MODES[m]})`}
+        {saving ? `Activo: Opus → ${SAVER_MODEL}${L.isCompact ? '' : ', esfuerzo medio'}` : `Inactivo (${modeText(m, sAt)})`}
       </Text>,
       <Box flexDirection="row" flexWrap="wrap" gap={1}>
         <Button key="modo-auto" hotkey="a" label="Auto" variant={m === 'auto' ? 'primary' : undefined} onPress={() => setMode($, 'auto')} />
